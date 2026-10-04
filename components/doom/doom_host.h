@@ -13,8 +13,8 @@
 #define DOOM_BTN_RIGHT   (1u << 3)   /* 十字键→ 右转（KEYD_RIGHT，锁存）   */
 #define DOOM_BTN_A       (1u << 4)   /* A 开火 → KEYD_B（passport 实证）   */
 #define DOOM_BTN_B       (1u << 5)   /* B 使用 → KEYD_A（开门/确认）       */
-#define DOOM_BTN_L       (1u << 6)   /* L 切枪 → KEYD_L                    */
-#define DOOM_BTN_R       (1u << 7)   /* R 切枪 → KEYD_R                    */
+#define DOOM_BTN_L       (1u << 6)   /* L → KEYD_L（引擎内已重映射为“上一把枪”）*/
+#define DOOM_BTN_R       (1u << 7)   /* R → KEYD_R（引擎内已重映射为“下一把枪”）*/
 #define DOOM_BTN_START   (1u << 8)   /* START 菜单 → KEYD_START            */
 #define DOOM_BTN_SELECT  (1u << 9)   /* SELECT → KEYD_SELECT               */
 #define DOOM_BTN_DRAG_L  (1u << 10)  /* 画面上拖拽左转（点按，与 LEFT 合并）*/

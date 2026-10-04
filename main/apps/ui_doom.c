@@ -1,8 +1,8 @@
 /* ui_doom.c - DOOM 应用层（SDGOODS 圆屏 · 360x360）
  *
- * 布局：中间 canvas 304x168 @(28,62) 显示 240x160 放大帧；
- *       全部按键排在画面下方的可达区（避开圆屏顶端触摸盲区与 0~50 顶部下滑捕获带）：
- *       左十字键（按住才动、松手即停）+ 右 A/B + 底部 START/SELECT + 中上 L/R；
+ * 布局：canvas 304x150 @(28,80) 显示 240x160 放大帧（下移以腾出顶部键行）；
+ *       顶部 y=64 一行放次要键 SE/ST/L/R（在 0~50 下滑捕获带下方、画布上方）；
+ *       下方可达区放操控主键：左十字方向键（按住才动、松手即停）+ 右 A(开火)/B(使用)；
  *       画面区不挂手势（转向=◀▶、开火=A）。
  * 帧链路：引擎任务(core0) 写索引 backbuffer → frame_ready → 本文件 poll 里
  *         转 RGB565 写 canvas(PSRAM) → lv_obj_invalidate → 平台 SRAM 条带 flush。
@@ -35,17 +35,18 @@ extern void InitGlobals(void);
 extern void D_DoomMain(void);
 extern int  doom_wad_init(void);
 
-#define CANVAS_W 304
-#define CANVAS_H 168
-#define CANVAS_X ((360 - CANVAS_W) / 2)  /* 28 */
-#define CANVAS_Y 62                       /* 角点距圆心 √(152²+84²)=173 < 180 ✓ */
+#define CANVAS_W 336                      /* 撑满圆屏：宽 336（x 12..348），仅上两角被圆盘裁掉一点 */
+#define CANVAS_H 200                      /* 240x160 帧放大到 336x200（近 1.6:1，轻微横向拉伸）*/
+#define CANVAS_X ((360 - CANVAS_W) / 2)  /* 12 */
+#define CANVAS_Y 58                       /* 顶 58、底 258；键为半透明白色浮于画面下沿（用户已同意覆盖）*/
 
 static lv_obj_t   *s_scr, *s_canvas;
-static lv_color_t *s_cbuf;               /* 304*168*2 = 102KB → lv_mem_alloc=malloc → PSRAM */
+static lv_color_t *s_cbuf;               /* 336*200*2 = 134KB → lv_mem_alloc=malloc → PSRAM */
 static bool       s_engine_started;
 static lv_obj_t  *s_btns[16];            /* 游戏按键，bind 后统一提到最上层压过 CC 顶部捕获带 */
 static int        s_btn_n;
 static int64_t    s_fps_t0;  static int s_fps_n;
+static lv_obj_t  *s_brand_lbl;   /* 顶部红色品牌行 sdgoods-doom */
 
 /* ---- 帧提交：索引→RGB565 最近邻放大（x 1.2667 / y 1.05） ---- */
 static void commit_frame(void)
@@ -87,17 +88,27 @@ static void btn_latch_cb(lv_event_t *e)  /* 十字键：锁存 + 组内互斥 */
     if (g_doom_host.btn_mask & bit) g_doom_host.btn_mask &= ~bit;        /* 再点=松开 */
     else { g_doom_host.btn_mask &= ~grp; g_doom_host.btn_mask |= bit; }
 }
-static lv_obj_t *make_btn(lv_obj_t *parent, int cx, int cy, int r,
+static lv_obj_t *make_btn(lv_obj_t *parent, int cx, int cy, int w, int h, int radius,
                           const char *txt, uint32_t bit, bool latch)
 {
     lv_obj_t *b = lv_btn_create(parent);
-    lv_obj_set_size(b, r * 2, r * 2);
-    lv_obj_set_pos(b, cx - r, cy - r);
-    lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_pos(b, cx - w / 2, cy - h / 2);
+    lv_obj_set_style_radius(b, radius, 0);
+    /* 半透明白色键（参考透粉 GBA 的白色十字/圆键）：淡白底 + 白描边，游戏画面透得过来 */
+    lv_obj_set_style_bg_color(b, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(b, 2, 0);
+    lv_obj_set_style_border_color(b, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(b, LV_OPA_70, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    /* 按下高亮：底色加实 + 描边不透明，给明确反馈 */
+    lv_obj_set_style_bg_opa(b, LV_OPA_60, LV_STATE_PRESSED);
+    lv_obj_set_style_border_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_t *lbl = lv_obj_get_child(b, 0);          /* LVGL 8.3 lv_btn 默认自带 label */
     if (!lbl) lbl = lv_label_create(b);
     lv_label_set_text(lbl, txt);
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
     lv_obj_center(lbl);
     lv_obj_add_event_cb(b, latch ? btn_latch_cb : btn_hold_cb, LV_EVENT_PRESSED, (void *)(uintptr_t)bit);
     if (!latch) {                                    /* 按住类：抬起 / 手指滑出都立即松开，防卡键 */
@@ -134,18 +145,21 @@ void ui_doom_start(void)
 
     /* 画面区不再挂拖拽/点击层：转向用 ◀▶ 键、开火用 A 键（单点触摸下更直观，也避免误触）。 */
 
-    /* 全部按键集中在画面下方 y≈232~316 的可达区（均在圆盘内、避开顶端触摸盲区与 0~50 捕获带）。
-     * 坐标已按圆方程 x²+y²（以圆心 180,180 为原点）校验在半径 180 内。 */
-    make_btn(s_scr,  82, 244, 16, LV_SYMBOL_UP,    DOOM_BTN_UP,    false);   /* 前进 */
-    make_btn(s_scr,  82, 300, 16, LV_SYMBOL_DOWN,  DOOM_BTN_DOWN,  false);   /* 后退 */
-    make_btn(s_scr,  54, 272, 16, LV_SYMBOL_LEFT,  DOOM_BTN_LEFT,  false);   /* 左转 */
-    make_btn(s_scr, 110, 272, 16, LV_SYMBOL_RIGHT, DOOM_BTN_RIGHT, false);   /* 右转 */
-    make_btn(s_scr, 296, 250, 20, "A",  DOOM_BTN_A,      false);   /* 开火 */
-    make_btn(s_scr, 258, 296, 18, "B",  DOOM_BTN_B,      false);   /* 使用/开门 */
-    make_btn(s_scr, 200, 300, 15, "ST", DOOM_BTN_START,  false);   /* 菜单 */
-    make_btn(s_scr, 152, 300, 13, "SE", DOOM_BTN_SELECT, false);   /* 选枪 */
-    make_btn(s_scr, 176, 244, 12, "L",  DOOM_BTN_L,      false);   /* 上一把枪 */
-    make_btn(s_scr, 226, 244, 12, "R",  DOOM_BTN_R,      false);   /* 下一把枪 */
+    /* 布局：画面撑满圆屏（336x200, y58..258），键为半透明白色浮在画面上（用户已同意覆盖）。
+     * 顶部窄行（y=40，画布之上）：L/R 小胶囊、SE/ST 胶囊条，提到前景压过 0~50 下滑捕获带。
+     * 方向键 + A + B 全部做成等大圆键（d=52），彼此留缝不重叠：方向键 4 颗排成十字
+     * （中心 103,266），A（右下拇指位）、B（A 左下）。坐标按圆方程（圆心 180,180，半径 180）校验。 */
+    make_btn(s_scr, 118, 40, 32, 26, 13, "L",  DOOM_BTN_L,      false);    /* 上一把枪（顶部） */
+    make_btn(s_scr, 158, 40, 40, 24, 12, "SE", DOOM_BTN_SELECT, false);    /* 选枪（顶部） */
+    make_btn(s_scr, 198, 40, 40, 24, 12, "ST", DOOM_BTN_START,  false);    /* 菜单（顶部） */
+    make_btn(s_scr, 238, 40, 32, 26, 13, "R",  DOOM_BTN_R,      false);    /* 下一把枪（顶部） */
+    /* 方向键：4 颗等大圆键排成十字（中心 103,266），四颗互不接触 */
+    make_btn(s_scr, 103, 220, 52, 52, 26, LV_SYMBOL_UP,    DOOM_BTN_UP,    false);   /* 前进 */
+    make_btn(s_scr, 103, 312, 52, 52, 26, LV_SYMBOL_DOWN,  DOOM_BTN_DOWN,  false);   /* 后退 */
+    make_btn(s_scr,  57, 266, 52, 52, 26, LV_SYMBOL_LEFT,  DOOM_BTN_LEFT,  false);   /* 左转 */
+    make_btn(s_scr, 149, 266, 52, 52, 26, LV_SYMBOL_RIGHT, DOOM_BTN_RIGHT, false);   /* 右转 */
+    make_btn(s_scr, 286, 254, 52, 52, 26, "A",  DOOM_BTN_A,      false);   /* 开火（与方向键等大） */
+    make_btn(s_scr, 236, 306, 52, 52, 26, "B",  DOOM_BTN_B,      false);   /* 使用/开门（等大） */
 
     lv_scr_load(s_scr);
     sdgoods_app_shell_bind(s_scr);                    /* 装顶部下滑控制中心捕获带 */
@@ -153,6 +167,14 @@ void ui_doom_start(void)
      *   bind 之后把游戏按键整体提到最上层，压过捕获带 → 按键恢复可点，
      *   控制中心仍可从顶部空白处下滑唤出。 */
     for (int i = 0; i < s_btn_n; i++) lv_obj_move_foreground(s_btns[i]);
+
+    /* 底部居中红色品牌行 sdgoods-doom（非交互 label，不拦截触摸）。 */
+    s_brand_lbl = lv_label_create(s_scr);
+    lv_obj_set_style_text_color(s_brand_lbl, lv_color_hex(0xff3030), 0);   /* 红字 */
+    lv_label_set_text(s_brand_lbl, "sdgoods-doom");
+    lv_obj_align(s_brand_lbl, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_move_foreground(s_brand_lbl);
+
     sdgoods_app_shell_set_exit_cb(on_menu_exit);
 
     if (!s_engine_started) {
@@ -166,6 +188,7 @@ void ui_doom_poll(void)
 {
     if (!sdgoods_app_shell_is_app_active()) return;
     if (g_doom_host.frame_ready) commit_frame();
+
 #if DOOM_INPUT_SELFTEST
     /* 自测：开机后自动走一遗“菜单 → New Game → 选难度”序列（START 开菜单，
      * 两次 B(=KEYD_A 菜单确认) 选中新游戏与难度），验证能否进入关卡渲染。
