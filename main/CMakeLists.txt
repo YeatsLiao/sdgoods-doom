@@ -24,12 +24,10 @@ idf_component_register(
         doom
         sdgoods_board
         sdgoods_launcher
-        bt
         driver
         esp_event
         esp_netif
         esp_timer
-        esp_wifi
         freertos
         hal
         heap

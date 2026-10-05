@@ -45,11 +45,9 @@
 #include "sdgoods_input.h"
 #include "sdgoods_power.h"
 
-/* 板载外设与服务 */
+/* 板载外设与服务（WiFi/BLE 已随独立游戏需求移除） */
 #include "sdgoods_audio.h"
 #include "sdgoods_hw_info.h"
-#include "sdgoods_wifi.h"
-#include "sdgoods_ble.h"
 
 /* 调试能力（改完 UI 用它截屏自证） */
 #include "sdgoods_screenshot.h"

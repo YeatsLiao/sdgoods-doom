@@ -10,8 +10,6 @@ set(SRCS
     # --- 板载外设与服务 ---
     "src/sdgoods_audio.c"
     "src/sdgoods_hw_info.c"
-    "src/sdgoods_wifi.c"
-    "src/sdgoods_ble.c"
     "src/sdgoods_jpeg.cpp"
 
     # --- BSP 基础能力 / 串口控制台（始终编译：'?' 能力查询应答方） ---
@@ -56,7 +54,6 @@ idf_component_register(
 
     REQUIRES
         lvgl
-        bt
         app_update
         driver
         esp_adc
@@ -70,7 +67,6 @@ idf_component_register(
         esp_psram
         bootloader_support
         esp_timer
-        esp_wifi
         freertos
         hal
         heap

@@ -77,6 +77,8 @@
  *     把 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM 10->3（动态 RX/TX 32->16）后：
  *       largest_free: 1664B -> **13824B**（app_store 处实测），控制中心整屏重绘正常。
  *     WiFi/BLE 功能全部保留（扫描页、plane BLE 对战都在），只是 RX 缓冲档位更低。
+ *     【2026-SDGOODS-DOOM 现状】本独立游戏固件已整体移除 WiFi/BLE，这块内部 DMA 已彻底释放，
+ *     上述调档不再是必需；本段保留作历史定案（为何「腾内部 DMA」才是正解）供后续同类问题参考。
  *   · 若将来 app 又变胖、余量重新掉到 8192B 以下，先查 WiFi/BLE 缓冲档位，
  *     再考虑把队列深度降到 1（需求减半到 4096B）—— 缩 LCD_SPI_MAX_TRANSFER_SIZE 是无效动作。 */
 #define LCD_SPI_MAX_TRANSFER_SIZE  512

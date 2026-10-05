@@ -23,7 +23,6 @@
 #include "driver/i2s_std.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -144,11 +143,9 @@ static inline int16_t sat16(int32_t s)
 
 static void rf_quiet_for_mic(bool quiet)
 {
-    if (quiet) {
-        (void)esp_wifi_stop();
-    } else {
-        (void)esp_wifi_start();
-    }
+    /* WiFi/BLE 已从本独立游戏固件移除，无需为录音静默 RF：桩成空实现，
+     * 保留调用点（录音路径 DOOM 不触发）以免改动调用方。 */
+    (void)quiet;
 }
 
 static int32_t isqrt64(int64_t x)

@@ -16,7 +16,7 @@
  * main.c —— 应用层装配点（Application entry）
  *
  * 这个文件属于**应用层**：它决定「用哪些应用、首屏是什么、怎么接线」。
- * 平台能力（屏 / 触摸 / 电源键 / 音频 / WiFi·BLE 扫描 / 应用框架 / 字体）
+ * 平台能力（屏 / 触摸 / 电源键 / 音频 / 应用框架 / 字体）
  * 全部来自 components/sdgoods_board，用一行 `#include "sdgoods_board.h"` 拿到。
  *
  * 想加自己的应用？（在本仓库内加演示应用）照着 main/apps/app_template.c 手写，
@@ -55,19 +55,7 @@ void app_main(void)
 
     /* 静音噪音大的子系统日志（只留 warn 以上），让串口日志聚焦在自己的代码上。
        调试某个子系统时，把它改成 ESP_LOG_INFO 或 DEBUG。 */
-    esp_log_level_set("wifi", ESP_LOG_WARN);
-    esp_log_level_set("wifi_init", ESP_LOG_WARN);
     esp_log_level_set("gpio", ESP_LOG_WARN);
-    esp_log_level_set("phy_init", ESP_LOG_WARN);
-    esp_log_level_set("phy", ESP_LOG_WARN);
-    esp_log_level_set("coexist", ESP_LOG_WARN);
-    esp_log_level_set("pp", ESP_LOG_WARN);
-    esp_log_level_set("net80211", ESP_LOG_WARN);
-    esp_log_level_set("esp_netif_handlers", ESP_LOG_WARN);
-    esp_log_level_set("BLE_INIT", ESP_LOG_WARN);
-    esp_log_level_set("BT_BTC", ESP_LOG_WARN);
-    esp_log_level_set("BT_BTM", ESP_LOG_WARN);
-    esp_log_level_set("BT_APPL", ESP_LOG_WARN);
     esp_log_level_set("i2c", ESP_LOG_ERROR);
 
     /* 电池供电自锁：拉高保持上电，关机时由平台层 sdgoods_power_off.c 释放 */
@@ -98,15 +86,8 @@ void app_main(void)
     ESP_ERROR_CHECK(sdgoods_touch_init());
     ESP_ERROR_CHECK(sdgoods_hw_info_init());
 
-    /* ⚠️ 板载服务（WiFi/BLE/Audio）刻意排在 LVGL/触摸之后 —— 内存原因，勿提前：
-     *   本工程内部可分配 RAM 只有 ~156KiB（heap_init 日志），而 WiFi+BLE+I2S 的
-     *   驱动缓冲会把其中的相当一部分吃掉。LVGL 的绘制缓冲虽然放在 PSRAM（全屏双块），
-     *   但 PSRAM 不能直接 DMA，每个 SPI 分片仍需要一块**内部 DMA 弹跳缓冲**
-     *   （见 sdgoods_lcd.h 的弹跳预算说明）。若 WiFi/BLE 先于 LVGL 初始化，
-     *   LVGL 建缓冲时内部 DMA 最大连续块只剩 ~10KB，随后界面一建就掉到 ~1.4KB，
-     *   整屏 flush 分片分配失败 -> 屏幕不更新（「下滑没有控制中心」「打不开 app0」）。 */
-    ESP_ERROR_CHECK(sdgoods_wifi_init());
-    ESP_ERROR_CHECK(sdgoods_ble_init());
+    /* 板载服务（Audio）排在 LVGL/触摸之后 —— 内存原因，勿提前。
+     * （WiFi/BLE 已随独立游戏需求移除，不再占用内部 DMA RAM。） */
     ESP_ERROR_CHECK(sdgoods_audio_init());
 
     /* 中文 fallback 已在编译期写入 si_yuan 图标字体的 .fallback 字段
