@@ -79,15 +79,3 @@ int sdgoods_cc_bat_read(float *v_out);
  * 若控制中心 / 滑块页打开则关闭并返回 true（事件已消费），否则返回 false。
  * 使「短按电源先关浮层」优先于「主页熄屏」。 */
 bool sdgoods_cc_power_short(void);
-
-/* ---- 应用上下文（按当前 app 定制控制中心）----------------------------------
- * 某些 app（如小鸟游戏）希望在使用时屏蔽部分系统按钮、并把一键改成「返回主页」。
- * 由应用层在进入 / 离开该 app 时调用设置；平台层通用逻辑据此调整布局，
- * 不把具体 app 的细节写死在控制中心里。DEFAULT 表示标准控制中心。 */
-typedef enum {
-    SDGOODS_CC_CTX_DEFAULT = 0,  /* 标准：Settings / About / Power 三键 */
-    SDGOODS_CC_CTX_BIRD,        /* 小鸟游戏：Volume / Brightness / Home 三键 */
-} sdgoods_cc_app_ctx_t;
-
-/* 设置控制中心的应用上下文（0 / DEFAULT 恢复标准行为）。由应用层调用。 */
-void sdgoods_cc_set_app_ctx(sdgoods_cc_app_ctx_t ctx);

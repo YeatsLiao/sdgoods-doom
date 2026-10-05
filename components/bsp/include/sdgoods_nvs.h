@@ -21,9 +21,8 @@
  * 非常难查。平台层自己保证这件事，app 就不必知道 NVS 的存在。
  *
  * 调用时机（都由平台层自己调，app 无需关心）：
- *   · `sdgoods_app_shell_init()` —— 所有 app 的统一入口，开机调一次即可覆盖整机生命周期
- *   · 控制中心读写设置前 —— 保证「不调 app_shell_init 的固件」（如启动器）也安全
- *   · 跳过开机动画标志读写前（`sdgoods_boot_skip.c`）
+ *   · `sdgoods_app_shell_init()` —— 应用外壳入口，开机调一次即可覆盖整机生命周期
+ *   · 控制中心读写设置前 —— 保证即使不调 app_shell_init 也安全
  */
 
 #pragma once

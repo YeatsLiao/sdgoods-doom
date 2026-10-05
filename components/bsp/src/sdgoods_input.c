@@ -188,21 +188,14 @@ void sdgoods_key_init(void)
 }
 
 /* ---------------------------------------------------------------------------
- * 电源键统一处理
- * 短按（分级导航，任何页面通用）：
- *   ① 上层钩子优先：启动器控制中心浮层打开 → 关闭浮层；应用子页打开 → 由应用钩子
- *      返回 true 表示已回退一级（子页 → 应用主页）。钩子未消费才走下面默认逻辑。
- *   ② 默认导航（已处在「应用主页」或「启动器主页」时）：
- *        · 应用菜单打开          → 关闭菜单；
- *        · 在应用内（钩子未消费）→ 多应用模式返回启动器（应用主页 → 启动器），
- *                                  派生/单应用模式熄屏 + 进入深度睡眠；
- *        · 已在应用主页          → 多应用模式（被启动器管理的 app）重启回启动器；
- *                                  其余熄屏 + 进入深度睡眠；
- *        · 已在启动器/设备主页   → 短按熄屏 + 进入深度睡眠（最低功耗，
- *                                  按一下电源键唤醒 = 冷启动直回主页、不重启）。
- *      即形成层级：子页 → 应用主页 →（多应用）启动器 → 深睡兜底；
- *      （派生/单应用）应用主页 / 启动器主页 → 深度睡眠。
- * 长按：按住 >= 1.2 s 后松手立即关机（任何页面通用，关机画面显示 "Power Off"），
+ * 电源键统一处理（单应用 DOOM 语义）
+ * 短按：
+ *   ① 上层钩子优先：应用层注册的钩子返回 true 表示已消费该次短按，
+ *      平台层不再走默认导航；返回 false 才走下面默认逻辑。
+ *   ② 控制中心浮层打开 → 关闭浮层回 DOOM。
+ *   ③ 其余（DOOM 全屏，无子页）→ 熄屏 + 进入深度睡眠（最低功耗；
+ *      再按电源键唤醒 = 冷启动直回 DOOM、不重启）。
+ * 长按：按住 >= 1.2 s 后松手立即关机（关机画面显示 "Power Off"），
  *       此时按键已不再压住自锁闩，闩释放即真正断电。
  * 注意：不能在按键仍按住时直接调用 sdgoods_power_off()，否则按键会把闩的释放
  * 信号覆盖掉，导致设备进入深度睡眠而不是关机，表现为“死机/黑屏动不了”。
@@ -212,46 +205,26 @@ static TickType_t s_key_press_tick = 0;
 static bool s_long_hold = false;
 
 /* 电源键「短按」的统一动作：真实短按（松手沿）与串口调试键 'P' 共用同一条路径，
- * 保证「串口模拟 == 真手指按键」。
- * 层级：上层钩子（关浮层/子页回退一级）→ 关应用菜单 → 应用内（多应用：回启动器；
- * 单应用：深度睡眠）→ 应用主页（被管理 app：重启回启动器；其余：深度睡眠）→ 深度睡眠。 */
+ * 保证「串口模拟 == 真手指按键」。单应用语义：钩子 → 关控制中心浮层 → 深睡兜底。 */
 void sdgoods_power_key_short_action(void)
 {
-    /* 短按：上层钩子优先（启动器控制中心浮层打开 → 关闭浮层；
-       应用子页打开 → 由应用钩子回退一级并返回 true）。
-       返回 true 表示已消费，不再走默认导航。 */
+    /* 上层钩子优先（应用层若已消费该次短按则直接返回）。 */
     if (sdgoods_ui_power_short()) {
         return;
     }
-    if (sdgoods_app_shell_menu_is_open()) {
-        sdgoods_app_shell_menu_close();
-    } else if (sdgoods_app_shell_is_app_active()) {
-        /* 处在某应用内、且子页已收起（钩子未消费 = 已在应用主页）：
-         * · 多应用模式：返回到启动器（写 otadata 指回 factory + 重启；
-         *   sdgoods_multi_app_exit_to_launcher 内部再判「是否被启动器管理」，
-         *   非被管理 app 返回 false 时退回「熄屏 + 浅睡眠」兜底）；
-         * · 派生/单应用模式：已在应用主页，熄屏并进入深度睡眠
-         *   （最低功耗；再按电源键唤醒 = 冷启动直回主页、不重启，
-         *   见 sdgoods_power_enter_deep_sleep）。 */
-        if (sdgoods_device_is_multi_app_mode()) {
-            if (!sdgoods_multi_app_exit_to_launcher()) {
-                sdgoods_power_enter_light_sleep();
-            }
-        } else {
-            sdgoods_power_enter_deep_sleep();
+    /* 控制中心浮层打开 → 先关闭它回 DOOM。弱引用：BSP 不硬依赖 control_center 组件，
+     * 未链接时符号为 NULL，跳过。 */
+    extern bool sdgoods_cc_is_open(void) __attribute__((weak));
+    extern void sdgoods_cc_close(void) __attribute__((weak));
+    if (sdgoods_cc_is_open && sdgoods_cc_is_open()) {
+        if (sdgoods_cc_close) {
+            sdgoods_cc_close();
         }
-    } else {
-        /* 已在「应用主页 / 启动器主页」：
-         * · 被启动器管理的 app（多应用）→ 退出回启动器
-         *   （写 otadata 指回 factory + 重启，见
-         *   sdgoods_multi_app_exit_to_launcher 强符号）；
-         * · 其余（派生 / 单应用 / 启动器宿主主页）→ 短按熄屏 +
-         *   进入深度睡眠（最低功耗；再按电源键唤醒 = 冷启动直回主页、
-         *   启动器宿主跳过开机 GIF，见 sdgoods_power_enter_deep_sleep）。 */
-        if (!sdgoods_multi_app_exit_to_launcher()) {
-            sdgoods_power_enter_deep_sleep();
-        }
+        return;
     }
+    /* DOOM 全屏、无子页：熄屏 + 进入深度睡眠（最低功耗；
+     * 再按电源键唤醒 = 冷启动直回 DOOM，见 sdgoods_power_enter_deep_sleep）。 */
+    sdgoods_power_enter_deep_sleep();
 }
 
 void sdgoods_power_key_poll(void)

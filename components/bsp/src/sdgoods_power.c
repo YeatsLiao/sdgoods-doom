@@ -16,7 +16,6 @@
 
 #include "board_pins.h"
 #include "sdgoods_lcd.h"
-#include "sdgoods_boot_skip.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"

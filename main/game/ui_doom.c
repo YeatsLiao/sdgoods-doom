@@ -127,8 +127,6 @@ static void doom_task(void *arg)
     I_PreInitGraphics(); I_Init(); Z_Init(); InitGlobals(); D_DoomMain();
 }
 
-static void on_menu_exit(void) { /* 单应用：引擎继续跑，画面留在原位 */ }
-
 void ui_doom_start(void)
 {
     if (s_scr) { lv_scr_load(s_scr); return; }          /* 幂等守卫 */
@@ -174,8 +172,6 @@ void ui_doom_start(void)
     lv_label_set_text(s_brand_lbl, "sdgoods-doom");
     lv_obj_align(s_brand_lbl, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_move_foreground(s_brand_lbl);
-
-    sdgoods_app_shell_set_exit_cb(on_menu_exit);
 
     if (!s_engine_started) {
         s_engine_started = true;

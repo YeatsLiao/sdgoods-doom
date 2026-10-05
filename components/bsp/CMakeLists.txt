@@ -5,7 +5,6 @@ set(SRCS
     "src/sdgoods_lvgl.c"
     "src/sdgoods_input.c"
     "src/sdgoods_power.c"
-    "src/sdgoods_boot_skip.c"
 
     # --- 板载外设与服务 ---
     "src/sdgoods_audio.c"
@@ -22,7 +21,7 @@ set(SRCS
 
     "src/sdgoods_hooks.c"
 
-    # --- 应用框架与开机流程 ---
+    # --- 应用外壳与手势 ---
     "src/sdgoods_app_shell.c"
     "src/sdgoods_swipe_back.c"
     "src/sdgoods_swipe_up.c"

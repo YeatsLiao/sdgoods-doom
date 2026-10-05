@@ -85,31 +85,9 @@ static lv_color32_t s_cc_icon_buf[8][CC_ICON_SZ * CC_ICON_SZ];
 static int s_cc_icon_base = 0;
 static int s_cc_icon_n = 0;
 
-/* 控制中心的应用上下文：由应用层在进入 / 离开某 app 时设置（如小鸟游戏隐藏部分按钮、
- * 改写第 5 键语义）。默认 DEFAULT = 标准 6 按钮控制中心。 */
-static sdgoods_cc_app_ctx_t s_app_ctx = SDGOODS_CC_CTX_DEFAULT;
-
-void sdgoods_cc_set_app_ctx(sdgoods_cc_app_ctx_t ctx)
-{
-    s_app_ctx = ctx;
-}
-
-/* 第 5 键在「小鸟游戏」上下文下的语义：返回主页（而非关机 / 退出启动器）。
- * 先关掉控制中心浮层，再走应用外壳的 leave(false) → 调回主页（apps_show = ui_home_show），
- * 并发 close_to_app 清掉小鸟屏。顺序必须是「关 CC 在前」：leave 会删掉当前活动屏，
- * 而 CC 是活动屏的子对象，先 leave 再关 CC 会变成对野指针 lv_obj_del。 */
-static void home_to_home_async(void *p)
-{
-    (void)p;
-    sdgoods_cc_close();
-    sdgoods_app_shell_leave(false);
-}
-static void tap_home(void *ud)
-{
-    (void)ud;
-    ESP_LOGI("cc", "tap: Home -> back to home");
-    lv_async_call(home_to_home_async, NULL);
-}
+/* 一级页按钮的图标 / 点击语义见下方 cc_open 的标准分支（Settings / About / Power）。
+ * 原「小鸟游戏（BIRD）应用上下文」随平台框架层剥离一并移除：本工程只有 DOOM 单应用，
+ * 「返回主页」的 leave / ui_home_show 语义已不存在。 */
 
 static void cc_icon_draw(lv_obj_t *canvas, cc_icon_t kind)
 {
@@ -1220,43 +1198,19 @@ void sdgoods_cc_open(void)
     s_cc_icon_n = 0;   /* 重置图标缓冲槽位，每个按钮各占一个 */
     s_cc_icon_base = 0;   /* 页基线：一级页固定从槽 0 起、设置页从槽 3 起（见 s_cc_icon_base 注释） */
 
-    /* 应用上下文：小鸟游戏下隐藏 Data / Battery / About，第 5 键改成「返回主页」。 */
-    const bool bird = (s_app_ctx == SDGOODS_CC_CTX_BIRD);
-
-    if (bird) {
-        /* 小鸟上下文：三个按钮一行居中（cy=169），专注游戏、减少误触。 */
-        make_round_btn(s_cc, 84,  169, 68, CC_ICON_VOL,  "Volume",  tap_vol,  NULL);
-        make_round_btn(s_cc, 180, 169, 68, CC_ICON_BRI,  "Brightness", tap_bri, NULL);
-        make_round_btn(s_cc, 276, 169, 68, CC_ICON_HOME, "Home",    tap_home, NULL);
-    } else {
-        /* 2026-09-26 用户口径：一级控制中心只保留「设置 / 关于 / Power」三个键，
-         * 声音、亮度、数据、电池四项全部收进「设置」的二级页（见 open_set）。
-         * 排列沿用原来「下排」那一行（三个键左对齐、整块在圆内左右居中）：
-         *   Settings(84) / About(180) / Power or Exit(276)，cy = 218，直径 68。
-         * 圆内校验（贴 360² 圆屏，别靠肉眼）：|OC|+r —— (84,218) 137.2 ✓、(180,218) 72.0 ✓、
-         * (276,218) 137.2 ✓ 均 < 180；caption 用 OUT_BOTTOM_MID +6 挂在按钮下缘
-         * （约 17px 高，底边 y≈275），最远角约 150 < 180 ✓。
-         * ⚠️ 「关机 / Exit」固定排在最右：误触代价最大。
-         * ⚠️ 第 3 个按钮不能用「设备模式 == MULTI」来选语义：启动器自己也是 MULTI，
-         *    但它要的是关机。判据必须是「本固件是不是被启动器管理的 app」：
-         *    从 ota_N 启动 ⇒ 被管理 ⇒ 提供 Exit（重启才回得去启动器）；
-         *    从 factory 启动（启动器宿主 / 单应用主机固件）⇒ 提供 Power（关机）。 */
-        /* 2026-09-27 用户口径：三个键**整块（按钮 + caption）垂直居中**。
-         * 整块高 = 68（按钮）+ 6（间距）+ ~17（caption）= 91px ⇒ 上下留白各 (360-91)/2 = 134.5，
-         * 按钮圆心 cy = 134.5 + 34 = 168.5 ≈ 169（与小鸟上下文那排同一几何，见上分支）。
-         * x 仍是 84 / 180 / 276（相邻圆心距 96、直径 68 ⇒ 间隙 28，整块宽 260，左右留白对称）。
-         * 圆内校验（贴 360² 圆屏，别靠肉眼）：按钮最远点 |OC|+r —— (84,169) 96.6+34 = 130.6 ✓、
-         * (180,169) 11+34 = 45 ✓、(276,169) 130.6 ✓，均 < 180。
-         * caption "Settings" 左下角约 (56,226)，距圆心 sqrt(124²+46²) = 132.3 ✓ < 180。
-         * 上下不打架：上排按钮顶 135（标题 "Control Center" 在 y≈40 以下，✓）；
-         * 下排 caption 底 ≈226（底部 "SINGLE/MULTI" 小字在 y≈316，✓）。 */
-        make_round_btn(s_cc, 84,  169, 68, CC_ICON_SET,  "Settings", tap_set, NULL);
-        make_round_btn(s_cc, 180, 169, 68, CC_ICON_INFO, "About", tap_about, NULL);
-        make_round_btn(s_cc, 276, 169, 68, CC_ICON_PWR, "Power", tap_pwr, NULL);
-    }
+    /* 一级控制中心保留「设置 / 关于 / Power」三个键，声音、亮度、数据、电池四项
+     * 全部收进「设置」的二级页（见 open_set）。三个键**整块（按钮 + caption）垂直居中**：
+     * 整块高 = 68（按钮）+ 6（间距）+ ~17（caption）= 91px ⇒ 上下留白各 (360-91)/2 = 134.5，
+     * 按钮圆心 cy = 134.5 + 34 = 168.5 ≈ 169。x 仍是 84 / 180 / 276（相邻圆心距 96、直径 68
+     * ⇒ 间隙 28，整块宽 260，左右留白对称）。圆内校验（贴 360² 圆屏）：按钮最远点 |OC|+r ——
+     * (84,169) 130.6 / (180,169) 45 / (276,169) 130.6，均 < 180 ✓。
+     * ⚠️ 「Power（关机）」固定排在最右：误触代价最大。 */
+    make_round_btn(s_cc, 84,  169, 68, CC_ICON_SET,  "Settings", tap_set, NULL);
+    make_round_btn(s_cc, 180, 169, 68, CC_ICON_INFO, "About", tap_about, NULL);
+    make_round_btn(s_cc, 276, 169, 68, CC_ICON_PWR, "Power", tap_pwr, NULL);
     /* 一级页实际占用的守卫槽数 —— 设置页的页基线就是 base + 它。
-     * 上面两个分支（小鸟 3 键 / 标准 3 键）当前都是 3；**改动一级页按钮数时必须同步改这里**，
-     * 否则设置页会从错误的基线取槽（轻则踩槽、重则点错按钮）。 */
+     * 一级页 3 键；**改动一级页按钮数时必须同步改这里**，否则设置页会从错误的基线取槽
+     * （轻则踩槽、重则点错按钮）。 */
     s_btn_l1_n = 3;
 
     /* 底部小横条：提示「从底部往上滑返回主页」 */
