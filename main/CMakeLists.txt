@@ -10,8 +10,7 @@ idf_component_register(
 
         # --- 应用层小工具（不注册成「应用」，只被 main.c / 页面调用） ---
         # （纯 DOOM 工程：app_data_store 已删——appdata 分区头部被 WAD 裸数据占用，不可挂 FAT）
-        # --- 游戏接线（应用注册表 + DOOM 首屏） ---
-        "game/apps_registry.c"
+        # --- 游戏（DOOM 首屏；单应用直启，无多应用注册表） ---
         "game/ui_doom.c"
 
     INCLUDE_DIRS

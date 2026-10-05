@@ -19,9 +19,8 @@
  * 平台能力（屏 / 触摸 / 电源键 / 音频 / 应用框架 / 字体）
  * 全部来自 components/bsp，用一行 `#include "bsp.h"` 拿到。
  *
- * 想加自己的应用？（在本仓库内加演示应用）照着 main/apps/app_template.c 手写，
- * 再参考 main/apps/apps_registry.c 的「新增一个应用」三步；要独立开发并上架自己的应用，
- * 用 `python3 tools/new_app_project.py <name>` 派生一个 PLANE 形单应用直启工程（见 skill sdgoods-new-app）。
+ * 本工程是独立单应用游戏固件：boot-direct 直接进 DOOM（ui_doom_start），
+ * 不再有「多应用注册表 / 启动器」那一层——轮询与电源键钩子在 app_main 里直接接线。
  */
 
 #include "driver/gpio.h"
@@ -31,12 +30,18 @@
 #include "freertos/task.h"
 
 #include "bsp.h"              /* 硬件抽象层：板级支持包总入口 */
-#include "apps_registry.h"    /* 应用层：应用清单与首屏接线 */
 #include "ui_doom.h"           /* 应用层：boot-direct 直启首屏（DOOM） */
 #include "build_version.h"    /* 自动生成：版本号 + SDGOODS 品牌信息 */
 #include "lvgl.h"              /* lv_refr_now：创建首屏后立刻刷新一帧，避免背光点亮时的白屏闪烁 */
 
 static const char *TAG = "SDGOODS";
+
+/* 电源键短按「一级返回」钩子：单应用全屏 DOOM 无子页可返回——始终返回 false，
+   交平台默认导航（控制中心浮层若开着由其自身消费；否则熄屏 + 浅睡，引擎继续在 core0 跑）。 */
+static bool doom_power_short_handler(void)
+{
+    return false;
+}
 
 void app_main(void)
 {
@@ -94,9 +99,10 @@ void app_main(void)
        （见 components/sdgoods_board/fonts/si_yuan_black_icon_*.c），
        不可在运行时写 const 字体结构体，否则会触发 ESP32 flash Cache 错误。 */
 
-    /* ★ 接线：把应用层的「轮询汇总 + 首屏 + 导航」注册给平台层。
-       必须放在 sdgoods_ui_home_create_show() 之前 —— 它会回调首屏创建函数。 */
-    apps_register();
+    /* ★ 接线：单应用直启——把 DOOM 的逐帧 poll 与电源键短按钩子直接注册给平台层。
+       （原多应用注册表已随架构重组移除；nav 导航钩子对单应用无意义，不再注册。） */
+    sdgoods_apps_set_poll(ui_doom_poll);
+    sdgoods_set_power_short_handler(doom_power_short_handler);
 
     /* 直接进入首屏：本工程(app0)不再单独播开机动画 —— 设备开机动画由 Launcher 在上电时
        负责，从 Launcher 启动 app0 时若再播一遍会重复。先建好首屏并刷新一帧，再点亮背光，
