@@ -20,11 +20,11 @@ jobs:
         with:
           path: main-repo
 
-      - name: Checkout GBADoom (esp32-ai-passport)
+      - name: Checkout GBADoom (esp32-sdgoods)
         uses: actions/checkout@v4
         with:
           repository: YeatsLiao/GBADoom
-          ref: esp32-ai-passport
+          ref: esp32-sdgoods
           path: gbadoom
 
       - name: Build
