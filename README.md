@@ -4,8 +4,8 @@
 > 用屏幕上的 **GBA 布局虚拟按键** 操作。独立单应用固件，开机直进游戏。
 
 这是从谷仓 SDGOODS 开放平台基础工程派生出的**纯 DOOM 工程**：只保留跑 DOOM 所需的
-平台 BSP（`components/sdgoods_board`、`sdgoods_launcher`、`jpegenc`）+ 引擎胶水层 +
-一个 LVGL 应用外壳，官方模板示例（主页启动台 / 小鸟 / 扫描示例）与发布链路脚本已全部剔除。
+平台 BSP（`components/bsp`、`components/control_center`、`components/jpegenc`）+ 引擎胶水层（`components/doom_engine`）+
+一个 LVGL 游戏外壳（`main/game`），官方模板示例（主页启动台 / 小鸟 / 扫描示例）、多应用注册表与发布链路脚本已全部剔除。
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 引擎与画面
 
-- 引擎：**GBADoom**（YeatsLiao fork 的 `esp32-ai-passport` 分支，PrBoom 血统，纯 C）
+- 引擎：**GBADoom**（YeatsLiao fork 的 `esp32-sdgoods` 分支，PrBoom 血统，纯 C）
 - 内部分辨率 **240×160**、8bpp 调色板索引，本工程经最近邻放大到 canvas **336×200** 撑满圆屏（居中 @ (12,58)，仅四角被圆形外框裁掉一点）
 - 帧链路：引擎任务（core 0）渲染索引帧 → 置 `frame_ready` → LVGL 线程（apps_poll）转 RGB565 写 PSRAM canvas → `lv_obj_invalidate` → 平台 SRAM 条带 flush 上屏
   - **不直刷 SPI**：绕开平台架构红线（QSPI DMA 缓冲不能取 PSRAM，否则黑条/红线）
@@ -53,8 +53,8 @@ CST816 是单点触摸，无法同时按多键，故为"单指"重新设计：
 依赖 ESP-IDF **v5.5** + GBADoom 源码树。
 
 ```bash
-# 1) 放置 GBADoom（esp32-ai-passport 分支），与本工程同级即可
-git clone -b esp32-ai-passport https://github.com/YeatsLiao/GBADoom ../GBADoom
+# 1) 放置 GBADoom（esp32-sdgoods 分支），与本工程同级即可
+git clone -b esp32-sdgoods https://github.com/YeatsLiao/GBADoom ../GBADoom
 
 # 2) 编译（默认找同级 ../GBADoom，也可用 -DGBADOOM_PATH 指定）
 . $IDF_PATH/export.sh
@@ -62,7 +62,7 @@ idf.py -B build_pub build
 #   路径不同：idf.py -B build_pub build -DGBADOOM_PATH=/path/to/GBADoom
 ```
 
-> 构建期会自动对 GBADoom 的 `z_zone.c` 打一处**幂等补丁**（`components/doom/patch_gbadoom.py`），
+> 构建期会自动对 GBADoom 的 `z_zone.c` 打一处**幂等补丁**（`components/doom_engine/patch_gbadoom.py`），
 > 把引擎的 128KB overflow 缓冲从内部 `.bss` 迁到 **PSRAM**——S3 内部 DRAM 要留给 LVGL 绘制缓冲
 > （必须在 SRAM）+ WiFi/BLE/音频，否则 `dram0` 链接溢出。补丁随源码提交，CI 干净 checkout 后同样生效。
 
@@ -100,7 +100,7 @@ esptool.py --chip esp32s3 -p <PORT> -b 921600 write_flash 0x1480000 DOOM_SFX.bin
 ## 截屏（抓取真机画面）
 
 设备把当前屏用 JPEG 编码后经 USB 串口回传，PC 端落盘成图片——无需相机拍屏，可远程核验画面。
-工具：`tools/screenshot_recv.py`（固件侧由 `components/sdgoods_board/src/sdgoods_screenshot.c` 响应，串口收到字符 `'s'` 即触发）。
+工具：`tools/screenshot_recv.py`（固件侧由 `components/bsp/src/sdgoods_screenshot.c` 响应，串口收到字符 `'s'` 即触发）。
 
 > ⚠️ 串口独占：截屏前**必须先关掉 `idf.py monitor` / 串口助手**，否则打不开端口。
 
@@ -129,29 +129,50 @@ python tools/screenshot_recv.py --selftest
 
 ---
 
+## 分层架构
+
+本工程剥离官方「平台应用框架」后只余四层，依赖自上而下单向（上层依赖下层，BSP 不反向硬依赖）：
+
+```
+┌─────────────────────────────────────────────┐
+│  game  —— main/game/ui_doom.c                 │  LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
+│  main/main.c：boot-direct 首屏直进 DOOM       │
+├──────────────┬──────────────────────────────┤
+│ doom_engine  │  control_center               │  引擎胶水（GBADoom 契约/音频/WAD）  系统浮层（顶部下滑）
+├──────────────┴──────────────────────────────┤
+│  bsp  —— components/bsp（伞形头 bsp.h）          │  硬件驱动：LCD QSPI / CST816 / I2S / LVGL 移植 / JPEG / 电源 / 手势
+└─────────────────────────────────────────────┘
+```
+
+- **bsp**：板级支持包，只保留硬件驱动。通过弱符号（`sdgoods_cc_open` / `sdgoods_cc_is_open` / `sdgoods_cc_close` …）与上层解耦，不含 control_center 时仍可编译。
+- **control_center**：取代旧「主页启动台 + 应用内菜单」的唯一系统 UI（顶部下滑唤出），以强符号覆盖 bsp 的弱默认。
+- **doom_engine**：GBADoom 引擎胶水层 + `doom_host.h` 契约（`btn_mask` / `frame_ready`）。
+- **game**：单应用外壳，`main.c` 直接接线轮询与电源键钩子（无多应用注册表）。
+
 ## 目录结构
 
 ```
 sdgoods-doom/
-├── CMakeLists.txt              # 定义 GBADOOM_PATH + 构建期打 GBADoom 补丁
+├── CMakeLists.txt              # 定义 GBADOOM_PATH + 构建期打 GBADoom 补丁（引用 components/doom_engine/）
 ├── DOOM1_PROCESSED.WAD         # 标准格式关卡 + GBA UI 补丁（引擎必需 lump；必须用此版，非 GBA 版）
 ├── DOOM_SFX.bin                # 音效库（tools/gen_soundbank.py 生成，烧 appdata+0x480000）
 ├── components/
-│   ├── doom/                   # ★ 引擎组件（GBADoom 源码 + SDGOODS 平台层）
-│   │   ├── CMakeLists.txt      #   GLOB 引擎源 + 排除表 + --wrap=clock
-│   │   ├── patch_gbadoom.py    #   构建期把 overflow 缓冲迁 PSRAM（幂等）
-│   │   ├── doom_host.h         #   引擎 ⇄ UI 唯一契约（btn_mask / frame_ready）
-│   │   ├── i_system_sdgoods.c  #   平台层：backbuffer(PSRAM)/调色板/键边沿检测
-│   │   ├── i_sound_esp32.c     #   ★ DOOM 音频后端：soundbank→PSRAM + 8 通道混音 + I2S 推流
-│   │   └── esp32_wad.c         #   从 appdata mmap WAD
-│   ├── sdgoods_board/          #   平台 BSP（屏/触摸/音频/LVGL/字体）— 勿动
-│   ├── sdgoods_launcher/       #   平台应用框架 — 勿动
+│   ├── bsp/                    #  ★ 平台 BSP（由官方 sdgoods_board 改名）：屏/触摸/音频/LVGL/字体/电源/手势 — 勿动
+│   │   └── include/bsp.h       #    伞形头（原 sdgoods_board.h）；内部子系统头仍按 sdgoods_*.h 命名
+│   ├── control_center/         #  ★ 控制中心（取代旧 launcher，由 sdgoods_launcher 改名）：顶部下滑系统浮层
+│   │   └── src/sdgoods_cc.c
+│   ├── doom_engine/            #  ★ 引擎组件（由 doom 改名；GBADoom 源码 + SDGOODS 平台层）
+│   │   ├── CMakeLists.txt      #    GLOB 引擎源 + 排除表 + --wrap=clock
+│   │   ├── patch_gbadoom.py    #    构建期把 overflow 缓冲迁 PSRAM（幂等）
+│   │   ├── doom_host.h         #    引擎 ⇄ UI 唯一契约（btn_mask / frame_ready）
+│   │   ├── i_system_sdgoods.c  #    平台层：backbuffer(PSRAM)/调色板/键边沿检测
+│   │   ├── i_sound_esp32.c     #    ★ DOOM 音频后端：soundbank→PSRAM + 8 通道混音 + I2S 推流
+│   │   └── esp32_wad.c         #    从 appdata mmap WAD
 │   └── jpegenc/
 ├── main/
-│   ├── main.c                  #   boot-direct 首屏直进 DOOM
-│   └── apps/
-│       ├── apps_registry.c     #   应用注册表（仅 DOOM 一条）
-│       └── ui_doom.[ch]        #   ★ LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
+│   ├── main.c                  #   boot-direct 首屏直进 DOOM（直接轮询/电源键钩子）
+│   └── game/                   #   ★ 游戏外壳（原 main/apps，已去 apps_registry）
+│       └── ui_doom.[ch]        #     LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
 ├── platform/                   #   分区表 + 预编译引导层（平台托管，勿改）
 ├── tools/gen_soundbank.py      #   音效库生成（GBADoom/music/*.wav → DOOM_SFX.bin + doom_sfx_index.h）
 ├── tools/screenshot_recv.py    #   真机截屏接收端（见上文“截屏”）
@@ -181,11 +202,11 @@ sdgoods-doom/
 
 ## 许可
 
-- **引擎相关**（`components/doom/*` + 链接的 GBADoom）：GBADoom/DOOM 引擎为 **GPL-2.0-or-later**，
+- **引擎相关**（`components/doom_engine/*` + 链接的 GBADoom）：GBADoom/DOOM 引擎为 **GPL-2.0-or-later**，
   合并固件产物按 GPL 条款分发。
-- **平台 BSP 组件**（`components/sdgoods_board`、`sdgoods_launcher`、`jpegenc`）：**Apache-2.0**，
+- **平台 BSP 组件**（`components/bsp`、`components/control_center`、`components/jpegenc`）：**Apache-2.0**，
   版权归深圳希德创新网络有限公司（SDGOODS）。
-- **应用外壳**（`main/*`）：源自 SDGOODS 基础工程，Apache-2.0 声明见文件头；随 GPL 引擎合并后整体按 GPL 分发。
+- **应用/游戏外壳**（`main/*`）：源自 SDGOODS 基础工程，Apache-2.0 声明见文件头；随 GPL 引擎合并后整体按 GPL 分发。
 - **`DOOM1_PROCESSED.WAD`**：游戏数据，版权归 **id Software**。本仓库沿用 passport 做法，仅以
   **shareware（DOOM1）版本**随固件分发，供合法试用；请自行通过官方渠道获取，勿用于商业分发。
 

@@ -24,8 +24,7 @@
  *
  * 二次开发建议
  * ------------
- * · 应用代码请放在 main/game/ 下；新建应用用 `tools/new_app_project.py <name>`
- *   派生独立工程（见 skill sdgoods-new-app），或复制 app_template.c/.h 改名后手动注册。
+ * · 应用代码请放在 main/game/ 下；本工程为单应用 DOOM 直启，无多应用注册表。
  * · 这个目录（components/bsp）是硬件抽象层：引脚、屏驱动、LVGL 移植、
  *   触摸、音频、应用框架。**一般不需要改**，除非你要换硬件或改平台行为。
  * · 唯一鼓励改的文件是 include/board_pins.h（引脚定义）。
@@ -34,7 +33,7 @@
  *   详见 src/sdgoods_lvgl.c 的注释。
  */
 
-/* 给应用层的接口（导航钩子 + UI 栅格） */
+/* 给应用层的接口（UI 栅格常量 + 轮询/电源键钩子） */
 #include "sdgoods_ui.h"
 #include "sdgoods_hooks.h"
 
@@ -60,13 +59,13 @@
 #include "sdgoods_caps.h"
 #include "sdgoods_console.h"
 
-/* 应用框架：所有应用统一「顶部下滑菜单 / 退出 / 暂停」体验 */
+/* 应用外壳：统一「顶部下滑控制中心 / 暂停 / 恢复」体验 */
 #include "sdgoods_app_shell.h"
 
-/* 设备级触摸手势（全设备统一口径，启动器与所有 app 共用）：
+/* 设备级触摸手势（全设备统一口径）：
  *   sdgoods_tap.h       —— 点按位移守卫 + PRESS_LOCK 所有权 + 装饰物穿透
  *   sdgoods_swipe_back.h —— 左缘右滑返回上一级
- *   sdgoods_swipe_up.h   —— 底部上滑回主页
+ *   sdgoods_swipe_up.h   —— 底部上滑（回调由调用方绑定，控制中心用它关浮层）
  * 一般无需手动调用：sdgoods_app_shell_init() 已自动安装手势策略。 */
 #include "sdgoods_tap.h"
 #include "sdgoods_swipe_back.h"

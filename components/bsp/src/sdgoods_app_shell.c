@@ -14,14 +14,8 @@
 
 #include "sdgoods_app_shell.h"
 
-#include <stdio.h>
-#include <string.h>
-
 #include "lvgl.h"
-#include "sdgoods_i18n.h"    /* SDG_T：界面文案中英切换 */
 #include "sdgoods_lcd.h"        /* LCD_WIDTH / LCD_HEIGHT */
-#include "sdgoods_ui.h"     /* SDG_UI_BTN_SIZE 等布局常量，菜单按钮复用主页风格 */
-#include "sdgoods_hooks.h"  /* 回主页 / 回应用页：交给应用层注册的实现 */
 #include "sdgoods_audio.h"  /* sdgoods_audio_set_volume / sdgoods_audio_get_volume */
 #include "sdgoods_screenshot.h"     /* sdgoods_screenshot_init：串口 's' 触发截屏（菜单按钮已移除） */
 #include "sdgoods_console.h"        /* sdgoods_console_init：BSP 串口控制台（'?' 能力查询，始终存在） */
@@ -66,8 +60,8 @@ static void vol_apply(int pct)
     s_vol_pct = pct;
     sdgoods_audio_set_volume(s_vol_pct);
     /* 立即落盘：
-     * 用户下一次很可能就是「返回启动器 → 进另一个 app」，不写就丢了。
-     * 弱符号：控制中心组件未链接时跳过（那种固件本来也没有跨 app 的场景）。 */
+     * 用户下一次很可能就是深睡唤醒（=冷启动），不写就丢了。
+     * 弱符号：控制中心组件未链接时跳过。 */
     extern void sdgoods_cc_flush(void) __attribute__((weak));
     if (sdgoods_cc_flush) {
         sdgoods_cc_flush();
@@ -107,29 +101,27 @@ static void shell_autobind_scan(lv_timer_t *t)
 
 void sdgoods_app_shell_init(void)
 {
-    /* ★ 先保障 NVS 可用：平台层有多个模块要写 NVS（控制中心音量/亮度、跳过开机动画
-     *   标志、语言…），而最小 app 可能从不 nvs_flash_init ⇒ 写入静默失败。
+    /* ★ 先保障 NVS 可用：平台层有多个模块要写 NVS（控制中心音量/亮度、语言…），
+     *   而最小应用可能从不 nvs_flash_init ⇒ 写入静默失败。
      *   做成平台自己的事，app 完全不必知道 NVS 的存在。幂等，开销一次函数调用。 */
     sdgoods_nvs_ensure();
 
-    /* ★★ 音量 / 亮度的**跨 app 同步**（2026-09-19 修）★★
+    /* ★★ 音量 / 亮度的**跨重启保存**（2026-09-19 修）★★
      *
-     * 为什么必须在这里做：本设备每次「进 app / 回启动器」都是**重启**
-     * （`esp_ota_set_boot_partition()` + `esp_restart()`，见 slot_manifest.c），
-     * RAM 里的任何状态都不会被带到下一个固件 —— 能跨固件传递状态的**只有 NVS**。
+     * 为什么必须在这里做：本设备深睡唤醒 = **冷启动**（app_main 重跑），
+     * RAM 里的任何状态都不会被带到下次启动 —— 能跨固件传递状态的**只有 NVS**。
      * 所以音量/亮度必须**每次启动都从 NVS 恢复**，否则用户会看到
-     * 「在 A 里调好 → 进 B 又变回去了」。写侧在控制中心（改一下防抖 800ms 落盘，
-     * 见 sdgoods_cc.c 的 save_timer；关闭 CC / 进 app / 关机前另有 flush）。
+     * 「调好→休眠唤醒后又变回去了」。写侧在控制中心（改一下防抖 800ms 落盘，
+     * 见 sdgoods_cc.c 的 save_timer；关闭 CC / 关机前另有 flush）。
      *
-     * ⚠️ 旧实现的 bug（两个叠加，用户可见症状 = 「音量亮度在 app 之间不同步」）：
+     * ⚠️ 旧实现的 bug（两个叠加，用户可见症状 = 「音量亮度开机后丢失」）：
      *   ① 这里直接 `sdgoods_audio_set_volume(s_vol_pct)`，而 `s_vol_pct` 硬编初值 0
-     *      ⇒ **每个 app 一启动就被压成静音**，日志 `init: default volume=0%`；
-     *   ② 恢复函数 sdgoods_cc_settings_restore() 只在**启动器**里被调过
-     *      （main/ui_launcher.c，创建主页时），app 侧从来没人调
-     *      ⇒ 亮度在 app 里根本没有恢复点，一直是面板复位后的默认值。
+     *      ⇒ **一启动就被压成静音**，日志 `init: default volume=0%`；
+     *   ② 恢复函数 sdgoods_cc_settings_restore() 从未在本路径被调用
+     *      ⇒ 亮度根本没有恢复点，一直是面板复位后的默认值。
      *
      * 弱符号引用（同 sdgoods_cc_open 的做法）：控制中心组件未链接时符号为 NULL，
-     * 跳过即可，不引入 board → launcher 的硬依赖。 */
+     * 跳过即可，不引入 board → control_center 的硬依赖。 */
     extern void sdgoods_cc_settings_restore(void) __attribute__((weak));
     if (sdgoods_cc_settings_restore) {
         sdgoods_cc_settings_restore();      /* NVS 有记录则同时恢复音量与亮度 */
@@ -143,22 +135,21 @@ void sdgoods_app_shell_init(void)
     ESP_LOGI("app_shell", "init: volume=%d%% (NVS-restored; cross-app synced)", s_vol_pct);
 
     /* ★ 电池读数（电压 / 百分比）同样是平台自己的事：
-     *   控制中心的「电量页」是**平台层共享代码**，任何 app 都能顶部下滑打开它，
+     *   控制中心的「电量页」是**平台层共享代码**，顶部下滑即可打开，
      *   而 `sdgoods_hw_bat_v()` 在 ADC 未初始化时**直接返回 0.f** ⇒ 屏上
      *   `Voltage --V` / `Level --%`。
-     *   旧版只有部分固件自己调 sdgoods_hw_info_init()（启动器、app0 调了；HELLO 没调）
-     *   ⇒ 同一个电量页在不同 app 里时好时坏 —— 典型症状「app 里看不到电量和电压」。
-     *   sdgoods_hw_info_init() 已做成幂等 + 不致命（见 sdgoods_hw_info.c），
-     *   重复调用安全，失败也只是电量页显示 `--` 而不会 abort。 */
+     *   旧版靠固件自己调 sdgoods_hw_info_init()，不同固件调不调不一致
+     *   ⇒ 同一个电量页时好时坏 —— 典型症状「看不到电量和电压」。
+     *   现在由平台在 app_shell_init 里统一调；sdgoods_hw_info_init() 已做成
+     *   幂等 + 不致命（见 sdgoods_hw_info.c），重复调用安全，失败也只是电量页显示 `--` 而不会 abort。 */
     sdgoods_hw_info_init();
 
     sdgoods_console_init();      /* BSP 串口控制台（'?' 能力查询等，始终存在） */
 #ifdef CONFIG_SDGOODS_SCREENSHOT
     sdgoods_screenshot_init();   /* 截屏能力：串口 's' 触发（须在 LVGL 线程内初始化） */
 #endif
-    /* ★ 设备级手势策略随应用外壳一起安装：app 只要按 SDK 文档接了应用外壳，
-     *   就自动获得与启动器一致的手势行为（PRESS_LOCK 所有权 + 点按位移守卫 +
-     *   装饰物穿透），无需自己知道这些细节。详见 sdgoods_tap.h。 */
+    /* ★ 设备级手势策略随应用外壳一起安装（PRESS_LOCK 所有权 + 点按位移守卫 +
+     *   装饰物穿透），上层无需自己接这些细节。详见 sdgoods_tap.h。 */
     sdgoods_tap_install();
 
     /* ★ 控制中心也做成默认：立刻给当前屏套上「顶部下滑唤出」，并起看门狗覆盖
@@ -248,9 +239,9 @@ void sdgoods_app_shell_bind(lv_obj_t *scr)
 }
 
 /* ---- 设备级控制中心：BSP 侧的弱默认实现 ------------------------------------
- * 真正的控制中心在平台层 components/sdgoods_launcher/src/sdgoods_cc.c。
- * 这里给一个**弱符号**空实现，让「不含 sdgoods_launcher 的精简工程」也能编过；
- * 只要工程带了该组件（app 都要带，返回启动器 / appdata 就在里面），链接器会选它的强符号。
+ * 真正的控制中心在 components/control_center/src/sdgoods_cc.c。
+ * 这里给一个**弱符号**空实现，让「不含 control_center 的精简工程」也能编过；
+ * 只要工程带了该组件，链接器会选它的强符号。
  * 做法与本工程 `sdgoods_console_ext_cmd`（BSP 弱默认、由工程覆盖）一致。 */
 __attribute__((weak)) void sdgoods_cc_open(void)
 {

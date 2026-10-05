@@ -32,10 +32,10 @@ void sdgoods_nvs_ensure(void)
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         /* 只有这两种情况才擦除重建（IDF 官方的标准恢复路径）。⚠️ 会清空整个 nvs 分区，
-         * 因此先打 WARN —— 里面还存着槽清单（SDGOODS_SLOTS_NVS_NS），清掉后启动器
-         * 需要重新扫描 ota_N 的 esp_app_desc_t 才能恢复「装了哪些 app」。 */
+         * 因此先打 WARN —— 里面存着控制中心的音量/亮度偏好（与语言等），擦除后
+         * 下次开机回到出厂默认。 */
         ESP_LOGW(TAG, "nvs_flash_init -> %s; erasing whole NVS and retrying "
-                      "(slot manifest will be re-scanned from flash)",
+                      "(cc vol/brightness prefs will reset to factory defaults)",
                  esp_err_to_name(err));
         nvs_flash_erase();
         err = nvs_flash_init();

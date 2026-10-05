@@ -56,26 +56,6 @@ bool sdgoods_power_is_suspended(void)
     return s_suspended;
 }
 
-/* 深度睡眠唤醒后是否跳过开机动画（仅启动器宿主读取，见 sdgoods_boot.c 的 sdgoods_boot_show）。
- * 主页短按深睡（sdgoods_power_enter_deep_sleep）置位；控制中心关机（sdgoods_power_off）清除。
- * 存于 RTC_DATA_ATTR：深睡唤醒后保留，真关机断电后丢失（冷启动默认播动画）。
- * 之所以需要这个标志，而不是在 boot 里简单判 `wakeup_cause==EXT0`：
- *   CC 关机若板级未真正断电会落到 sdgoods_power_off 里的深睡兜底，其唤醒源同样是 EXT0 电源键，
- *   与「主页短按深睡唤醒」无法靠唤醒源区分；用显式标志才能正确区分两条语义。 */
-RTC_DATA_ATTR static uint8_t s_wake_skip_gif = 0;
-
-void sdgoods_power_set_wake_skip_gif(bool skip)
-{
-    s_wake_skip_gif = skip ? 1 : 0;
-}
-
-bool sdgoods_power_consume_wake_skip_gif(void)
-{
-    bool ret = (s_wake_skip_gif != 0);
-    s_wake_skip_gif = 0;   /* 消费掉，避免残留影响后续启动 */
-    return ret;
-}
-
 /* 主页短按电源键 → 熄屏 + 进入超低功耗浅睡眠。
  * 唤醒源 = 电源键（ext0）；按一下即「原地唤醒并亮屏」，走的是恢复（resume）而非冷启动，
  * 所以**不会重启**：唤醒后从本函数返回处继续，LVGL / 外设 / 应用状态全部原样保留。
@@ -105,15 +85,13 @@ void sdgoods_power_enter_light_sleep(void)
  * 与 sdgoods_power_enter_light_sleep 的取舍：
  *   · 浅睡：原地恢复（不重启），唤醒快，但 SoC 仍部分上电、耗电较高；
  *   · 深睡：整片断电、唤醒 = 冷启动（走 app_main 重跑），唤醒较慢，但功耗最低。
- * 用户明确选择深睡（功耗优先）。唤醒后直接回主页、不播开机动画：
- *   EBADGE/PLANE/HELLO 冷启动本就直进主页（main.c 不调开机动画）；
- *   启动器宿主（LAUNCHER）在 sdgoods_boot_show 里对「主页短按深睡唤醒」显式跳过 GIF。
+ * 用户明确选择深睡（功耗优先）。唤醒后直接回首屏、不播开机动画：
+ *   本工程 main.c 直进 DOOM 首屏、本就不播开机动画，深睡唤醒即冷启动回到 DOOM。
  * 关键：深睡会丢失普通 GPIO 输出，必须把电池自锁闩（BOARD_BAT_CONTROL_GPIO=GPIO7）
  * 用 gpio_hold_en + gpio_deep_sleep_hold_en 锁住，否则唤醒瞬间板上已断电、
  * 电源键的 EXT0 唤醒虽触发却无电可起。GPIO7 在 ESP32-S3 的 RTC GPIO 范围内，可安全 hold。
  * 唤醒源 = 电源键（GPIO6，active-low，EXT0）。唤醒那一下按键仍按住，
- * 释放 guard 在 sdgoods_key_init 里处理（避免被当成新短按立刻再睡）。
- * 在入睡前置位「跳过开机动画」标志，供 LAUNCHER 的 sdgoods_boot_show 在 EXT0 唤醒后识别。 */
+ * 释放 guard 在 sdgoods_key_init 里处理（避免被当成新短按立刻再睡）。 */
 void sdgoods_power_enter_deep_sleep(void)
 {
     ESP_LOGI(TAG, "entering deep sleep (wake on power key press, lowest power)");
@@ -123,8 +101,6 @@ void sdgoods_power_enter_deep_sleep(void)
     /* 锁住电池自锁闩，使其在高功耗深睡期间仍保持「上电」电平。 */
     gpio_hold_en(BOARD_BAT_CONTROL_GPIO);
     gpio_deep_sleep_hold_en();
-
-    sdgoods_power_set_wake_skip_gif(true);   /* 标记：本次深睡唤醒应跳过开机动画 */
 
     esp_sleep_enable_ext0_wakeup(BOARD_KEY_GPIO, BOARD_KEY_ACTIVE_LEVEL);
     esp_deep_sleep_start();
@@ -193,9 +169,8 @@ void sdgoods_power_off(void)
         vTaskDelay(pdMS_TO_TICKS(800));   /* 让用户看清再断电 */
     }
 
-    /* 若在 app 内关机：下次开机直接回启动器（factory 分区）。
-       关机是完整的「断电-再上电」周期，视为一次冷启动，开机动画照常播放，
-       故不写「跳过动画」标志。factory 指向启动器。 */
+    /* 下次开机指向 factory 分区（单应用固件里 factory 就是本 DOOM 固件本身）。
+       关机是完整的「断电-再上电」周期，视为一次冷启动，直进 DOOM 首屏。 */
     const esp_partition_t *factory =
         esp_partition_find_first(ESP_PARTITION_TYPE_APP,
                                  ESP_PARTITION_SUBTYPE_APP_FACTORY, NULL);
@@ -207,10 +182,6 @@ void sdgoods_power_off(void)
     sdgoods_lcd_set_backlight(0);
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    /* 明确清除「跳过开机动画」标志：本次是真实关机意图，下次上电（无论真断电冷启
-       还是板级未断电落到下方深睡兜底）都应播开机动画，而非像主页短按深睡那样跳过。 */
-    sdgoods_power_set_wake_skip_gif(false);
-
     /* Release the self-holding battery latch -> hard power cut.
        BOARD_BAT_CONTROL_LATCH_LEVEL is the level that keeps power on, so the
        opposite level releases it. */
@@ -219,9 +190,7 @@ void sdgoods_power_off(void)
 
     /* Fallback: if power was NOT actually cut (e.g. the physical power button
        is still held and overrides the latch), drop into deep sleep and wake on
-       the physical key so the badge at least stops consuming power.
-       注意：上面的 set_wake_skip_gif(false) 已抢先清掉标志，所以这条兜底深睡唤醒
-       后也会播开机动画（与真实关机语义一致），不会误判成「主页短按深睡」而跳过 GIF。 */
+       the physical key so the badge at least stops consuming power. */
     esp_sleep_enable_ext0_wakeup(BOARD_KEY_GPIO, BOARD_KEY_ACTIVE_LEVEL);
     esp_deep_sleep_start();
 }

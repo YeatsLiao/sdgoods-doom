@@ -15,7 +15,7 @@
 #include "sdgoods_swipe_up.h"
 
 #include "lvgl.h"
-#include "esp_log.h"   /* 诊断日志：上滑返回主页是否被判定（阈值/方向一目了然） */
+#include "esp_log.h"   /* 诊断日志：上滑是否被判定为命中回调（阈值/方向一目了然） */
 
 static const char *TAG = "swipe_up";
 
@@ -28,7 +28,7 @@ static const char *TAG = "swipe_up";
 #define SWIPE_UP_H    110
 /* 底部小横条中心约在 (180,336)；捕获区扩成整屏宽、底部 90px 的带，
  * 用户从底部任意位置起手往上滑都能被接住（旧版 60×30 太小、必须精准命中，
- * 真机上几乎接不住 -> 二级页上滑回主页失效）。捕获层置于控件之下，
+ * 真机上几乎接不住 -> 二级页上滑关闭失效）。捕获层置于控件之下，
  * 页面按钮 / 滑块仍正常点按、拖动，不会误触。 */
 
 static lv_coord_t s_px;
@@ -61,10 +61,10 @@ static void on_released(lv_event_t *e)
     lv_indev_get_point(indev, &p);
     int dx = (int)p.x - (int)s_px;
     int dy = (int)p.y - (int)s_py;
-    /* 仅在底部小横条区域起手、且纵向位移明显大于横向 → 返回主页 */
+    /* 仅在底部小横条区域起手、且纵向位移明显大于横向 → 命中上滑回调 */
     const bool hit = (dy < -SWIPE_MIN_DY && LV_ABS(dy) > LV_ABS(dx));
     ESP_LOGI(TAG, "start=(%d,%d) dx=%d dy=%d (need dy<-%d) -> %s",
-             (int)s_px, (int)s_py, dx, dy, SWIPE_MIN_DY, hit ? "HOME" : "ignore");
+             (int)s_px, (int)s_py, dx, dy, SWIPE_MIN_DY, hit ? "HIT" : "ignore");
     if (hit) {
         /* 用 async 避免在输入事件回调里删除对象导致崩溃 */
         lv_async_call((lv_async_cb_t)on_up, NULL);
@@ -84,7 +84,7 @@ void sdgoods_swipe_up_bind(lv_obj_t *scr, void (*on_up)(void))
     lv_obj_add_flag(cat, LV_OBJ_FLAG_CLICKABLE);
     /* ⚠️ PRESS_LOCK 必须加：LVGL 在按下期间每个输入周期都会重新命中测试，
      * 手指一旦滑出捕获区，act_obj 会被切走 -> PRESS_LOST -> RELEASED 永不触发
-     * -> 上滑返回主页失效。加 PRESS_LOCK 后，lv_indev.c 的重命中分支
+     * -> 上滑回调失效。加 PRESS_LOCK 后，lv_indev.c 的重命中分支
      * （scroll_obj==NULL && !PRESS_LOCK）被跳过，act_obj 锁定在本捕获层，
      * 松手时 RELEASED 一定投递到这里，再按起点/终点位移判定是否算上滑。 */
     lv_obj_add_flag(cat, LV_OBJ_FLAG_PRESS_LOCK);

@@ -6,7 +6,7 @@
 ESP32-S3 内部 DRAM（dram0）要留给：
   · LVGL 绘制缓冲——平台架构红线，放 PSRAM 会黑条/红线，必须在 SRAM；
   · WiFi/BLE/音频驱动缓冲。
-GBADoom 的 esp32-ai-passport 分支是为**无 PSRAM 的 ESP32-C3** 写的，z_zone.c 把
+GBADoom 的 esp32-sdgoods 分支（承自为**无 PSRAM 的 ESP32-C3** 写的移植），z_zone.c 把
 128KB 的 overflow_buffer 放成 `static byte[...]`（.bss → 内部 DRAM）。叠加本工程的
 backbuffer/canvas 后 dram0 溢出约 100KB，链接失败。
 

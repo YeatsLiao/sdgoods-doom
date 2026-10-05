@@ -5,13 +5,13 @@
 # 工程名决定固件产物名：编译后得到 build*/SDGOODS_DOOM.bin（烧到 0x10000）。
 # EBADGE = Electronic Badge（电子徽章）—— 与产品名「谷仓次元屏（谷仓电子徽章）」一致。
 cmake_minimum_required(VERSION 3.16)
-# GBADoom 引擎源码树（分支 esp32-ai-passport）。默认同级 ../GBADoom；
+# GBADoom 引擎源码树（分支 esp32-sdgoods）。默认同级 ../GBADoom；
 # CI / 特殊路径可用 -DGBADOOM_PATH=<dir> 覆盖。
 if(NOT DEFINED GBADOOM_PATH)
   set(GBADOOM_PATH "${CMAKE_CURRENT_LIST_DIR}/../GBADoom" CACHE PATH "GBADoom source tree")
 endif()
 if(NOT EXISTS "${GBADOOM_PATH}/source/d_main.c")
-  message(FATAL_ERROR "GBADOOM_PATH=${GBADOOM_PATH} 无效。请先放置 GBADoom(esp32-ai-passport) 源码树")
+  message(FATAL_ERROR "GBADOOM_PATH=${GBADOOM_PATH} 无效。请先放置 GBADoom(esp32-sdgoods) 源码树")
 endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(SDGOODS_DOOM)

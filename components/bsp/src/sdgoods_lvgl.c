@@ -219,7 +219,7 @@ void sdgoods_lvgl_init(void)
      *   而 PSRAM 绘制缓冲（全屏 259200B）的**每个分片**都要一块内部 DMA
      *   弹跳缓冲（PSRAM 不在 DMA 窗口内，spi_master 必须拷到内部 RAM 才能发），
      *   分配失败即 0x101 → draw_bitmap 整块失败 → 该帧屏幕不更新。
-     *   用户可见症状：「app 下滑没有控制中心」；整屏都失败时就是「无法打开 app0」。
+     *   用户可见症状：「下滑没有控制中心」；整屏都失败时就是「首屏刷不出来 / 黑屏」。
      *
      *   阈值取 0：**所有**通用 malloc 都走 PSRAM（8MB 富余），内部 DMA 完整
      *   留给 SPI 弹跳。实测取 128 时仍不够 —— LVGL 单个对象虽 >128B，但样式、
@@ -319,9 +319,8 @@ void sdgoods_lvgl_loop(void)
          * 背光已关闭，仅保留电源键轮询以便下次短按唤醒。大幅省电且唤醒即时。 */
         if (!sdgoods_power_is_suspended()) {
             lv_timer_handler();
-            /* 各应用的定时器推进（主页刷新 / 游戏物理 / 蓝牙收包 / 扫描结果…）
-               由应用层汇总成一个函数注册进来，新增应用只需改 apps_registry.c，
-               这个平台主循环永远不用动。 */
+            /* 应用侧的轮询钩子（DOOM 的定时/物理等）由上层通过 sdgoods_apps_set_poll()
+               注册为一个函数，本平台主循环只调 sdgoods_apps_poll()，本身不用改。 */
             sdgoods_apps_poll();
         }
         vTaskDelay(pdMS_TO_TICKS(2));

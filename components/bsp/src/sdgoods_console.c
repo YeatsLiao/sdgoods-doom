@@ -51,7 +51,7 @@ void usb_serial_jtag_vfs_set_tx_line_endings(esp_line_endings_t mode);
 
 static const char *TAG = "bsp-console";
 
-/* 诊断扩展点：应用层（如启动器）可覆盖此弱符号，注册额外串口命令。
+/* 诊断扩展点：应用层可覆盖此弱符号，注册额外串口命令。
  * 不破坏平台/应用分层（BSP 不 include 应用层）。仅用于调试。
  *
  * ★ 弱默认实现 = **平台内置自检**，两类能力：
@@ -64,8 +64,7 @@ static const char *TAG = "bsp-console";
 __attribute__((weak)) void sdgoods_console_ext_cmd(char c)
 {
     switch (c) {
-    case '0':   /* 点按下排按钮位 (180,218)：控制中心第 5 个按钮 = Power | Exit。
-                 * 验「Exit 真能回启动器」就靠它 —— app 里没有别的办法点这个按钮。 */
+    case '0':   /* 点按下排按钮位 (180,218)：留作合成点按坐标，当前单应用页该位置无按钮。 */
         sdgoods_tap_synth(LCD_WIDTH / 2, 218, 0, 0, 1);
         break;
     case '1':   /* 点按屏中央：验证按钮命中 / 点按判定 */
@@ -74,7 +73,7 @@ __attribute__((weak)) void sdgoods_console_ext_cmd(char c)
     case '2':   /* 顶部下划 75px：打开控制中心（app 外壳手势） */
         sdgoods_tap_synth(LCD_WIDTH / 2, 40, 0, 25, 3);
         break;
-    case '3':   /* 底部上划 75px：返回主页 / 关闭系统浮层 */
+    case '3':   /* 底部上划 75px：关闭系统浮层（回到 DOOM） */
         sdgoods_tap_synth(LCD_WIDTH / 2, LCD_HEIGHT - 40, 0, -25, 3);
         break;
     case '4':   /* 左缘右滑 75px：返回上级 */
@@ -83,34 +82,33 @@ __attribute__((weak)) void sdgoods_console_ext_cmd(char c)
     case '5':   /* 起手后滑走（上划 75px）：验证「滑动掠过不算点按」 */
         sdgoods_tap_synth(70, 157, 0, -25, 3);
         break;
-    /* 'C' / 'D' / 'B'：直接打开控制中心的一级页 / 数据页 / 电量页（离线核验非首屏）。
+    /* 'C' / 'D' / 'B'：直接打开控制中心页 / 电量页（离线核验非首屏）。
      * 为什么需要它：截屏只能拿到**当前那一屏**，而 CC 的二级页要先「下划开 CC」再
-     * 点中对应按钮 —— app 里没有能点到 Data 按钮的合成手势（'0' 只落在下排按钮位）。
+     * 点中对应按钮 —— app 侧没有能点到对应按钮的合成手势。
      * ⚠️ 实现内部会**先 close 再 open**，否则 cc_open 见已有浮层会直接返回，
-     *   截到的还是上一页。启动器自己也有一套（小写 c/d/b，见 main/launcher_main.c）。 */
+     *   截到的还是上一页。 */
     case 'C':
     case 'D':
     case 'B': {
         if (!sdgoods_cc_debug_open) {
-            ESP_LOGW(TAG, "'%c': launcher component not linked, no-op", c);
+            ESP_LOGW(TAG, "'%c': control_center component not linked, no-op", c);
             break;
         }
         const int which = (c == 'C') ? 0 : (c == 'D') ? 1 : 2;
-        ESP_LOGI(TAG, "'%c': opening control center page %d (0=main 1=data 2=battery)", c, which);
+        ESP_LOGI(TAG, "'%c': opening control center page %d (0/1=main 2=battery)", c, which);
         sdgoods_cc_debug_open(which);
         break;
     }
     case 'p':   /* 调试：模拟「主页短按电源键」的生产路径 = 熄屏 + 进入深度睡眠
-                 *（最低功耗；再按电源键唤醒 = 冷启动直回主页，不播开机动画）。
+                 *（最低功耗；再按电源键唤醒 = 冷启动直回 DOOM，不播开机动画）。
                  * 函数只碰背光 + gpio hold + esp_deep_sleep_start，不碰 LVGL 对象树，
                  * 可在 console 任务直接调。深睡后串口断开，需按电源键唤醒后串口才重新枚举。 */
         ESP_LOGI(TAG, "'p': enter deep sleep (simulate home short power press)");
         sdgoods_power_enter_deep_sleep();
         break;
     case 'P':   /* 调试：模拟电源键「短按」的完整生产路径（与真实松手沿共用
-                 * sdgoods_power_key_short_action()：钩子 → 菜单 → 应用内分级 →
-                 * 应用主页（被管理 app 重启回启动器）/ 深睡）。串口验证电源键
-                 * 分级导航用，不需要真手指按键。 */
+                 * sdgoods_power_key_short_action()：上层钩子 → 若 CC 开着则关浮层 → 否则深睡）。
+                 * 串口验证电源键单应用语义用，不需要真手指按键。 */
         ESP_LOGI(TAG, "'P': power key short-press action (production path)");
         sdgoods_power_key_short_action();
         break;

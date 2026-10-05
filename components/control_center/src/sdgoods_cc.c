@@ -1,6 +1,6 @@
 /*
  * 谷仓共创计划 · 谷仓 SDGOODS 开放平台基础工程
- * 平台层（板级支持包 BSP）· 多应用启动器 · 控制中心
+ * 平台层（板级支持包 BSP）· 控制中心
  * https://github.com/SDGOODS/SDGOODS-ESP32S3
  *
  * Copyright (c) 2026 深圳希德创新网络有限公司 (SDGOODS)
@@ -37,7 +37,7 @@
 #include "sdgoods_lvgl.h"      /* sdgoods_lvgl_post：跨任务投递到 LVGL 线程的唯一入口 */
 #include "sdgoods_audio.h"     /* sdgoods_audio_set/get_volume */
 #include "sdgoods_power.h"     /* sdgoods_power_off */
-#include "sdgoods_swipe_up.h"   /* sdgoods_swipe_up_bind：底部上滑返回主页 */
+#include "sdgoods_swipe_up.h"   /* sdgoods_swipe_up_bind：底部上滑关闭控制中心 */
 #include "sdgoods_swipe_back.h"  /* sdgoods_swipe_back_bind：左→右返回上一级 */
 
 #include "sdgoods_hw_info.h"     /* sdgoods_hw_bat_v：电池电压（ADC1_CH7） */
@@ -67,7 +67,7 @@ typedef enum {
     CC_ICON_DATA,  /* 数据 */
     CC_ICON_BAT,   /* 电量（电池电压） */
     CC_ICON_INFO,  /* 关于 */
-    CC_ICON_HOME,  /* 返回主页（小鸟游戏上下文下的第 5 键） */
+    CC_ICON_HOME,  /* 房子图标：随平台框架层（小鸟/BIRD 多应用）剥离后已不再挂到任何按钮，仅保留绘制实现 */
     CC_ICON_SET,   /* 设置（二级设置页入口，把声音/亮度/数据/电池收进去） */
 } cc_icon_t;
 
@@ -217,7 +217,7 @@ static void cc_icon_draw(lv_obj_t *canvas, cc_icon_t kind)
     }
 
     case CC_ICON_HOME: {
-        /* 房子：三角屋顶 + 方身 + 黑色小门（「返回主页」语义） */
+        /* 房子：三角屋顶 + 方身 + 黑色小门（历史「返回主页」图标，现已不挂接） */
         lv_draw_line_dsc_t roof;
         lv_draw_line_dsc_init(&roof);
         roof.color = lv_color_white();
@@ -283,7 +283,7 @@ static lv_obj_t *s_set = NULL;    /* 设置二级页（声音/亮度/数据/电�
 static void (*s_apply)(int) = NULL;
 static lv_obj_t *s_val_label = NULL;
 
-/* 前向声明：二级页从底部小横条上滑直接返回主页时调用 */
+/* 前向声明：二级页从底部小横条上滑直接关闭控制中心（回到 DOOM）时调用 */
 void sdgoods_cc_close(void);
 
 /* 点按守卫上下文池：每个按钮一份（静态存储，不做动态分配 ⇒ 没有失败路径）。 */
@@ -340,7 +340,7 @@ static lv_obj_t *make_round_btn(lv_obj_t *parent, int cx, int cy, int d,
         lv_img_set_antialias(cv, true);
         lv_img_set_zoom(cv, 208);
         /* 关键：关掉画布的可点击，否则点击会被画布吃掉、按钮的 CLICKED 收不到
-         * （与 ui_launcher.c 的圆形图标 ic 处理一致：清掉 CLICKABLE 让命中穿透到按钮）。 */
+         * （清掉 CLICKABLE 让命中穿透到按钮）。 */
         lv_obj_clear_flag(cv, LV_OBJ_FLAG_CLICKABLE);
     }
 
@@ -370,8 +370,8 @@ static lv_obj_t *make_round_btn(lv_obj_t *parent, int cx, int cy, int d,
     return btn;
 }
 
-/* 底部小横条（home 指示）：提示「从底部往上滑返回主页」。
- * 短而灰，纯指示用；非点击性（CLICKABLE 关掉），让起手于底部的上滑穿透到捕获层触发返回。 */
+/* 底部小横条（关闭指示）：提示「从底部往上滑关闭控制中心、回到 DOOM」。
+ * 短而灰，纯指示用；非点击性（CLICKABLE 关掉），让起手于底部的上滑穿透到捕获层触发关闭。 */
 static void make_bottom_hint(lv_obj_t *parent)
 {
     lv_obj_t *bar = lv_obj_create(parent);
@@ -393,8 +393,8 @@ static void make_bottom_hint(lv_obj_t *parent)
 /* 亮度**用户意图值**（0~100）：落盘存的是它，不是背光 PWM 的瞬时值。
  *
  * 为什么不直接存 `sdgoods_lcd_get_backlight()`：那是**瞬时值**，会被三种「临时熄灭」
- * 改掉 —— ①开机动画期间（sdgoods_boot.c 刻意先保持 0，动画播完才点亮）；
- * ②息屏低功耗（sdgoods_power_suspend_toggle 压 0）；③关机前（power_off 压 0）。
+ * 改掉 —— ①息屏低功耗（sdgoods_power_suspend_toggle 压 0）；②关机（power_off 压 0）；
+ * ③深睡/浅睡前熄屏。
  * 任何一次落盘撞上这三种状态，就会把 0 写进 NVS ⇒ 下次开机 `restore` 直接把背光
  * 按成 0 ⇒ **用户看到黑屏**。而息屏状态本身是 RAM-only、重启就没了，
  * 所以那个 0 纯粹是「临时态泄漏」，不是任何人的偏好。
@@ -506,15 +506,14 @@ void sdgoods_cc_flush(void)
     cc_settings_save();
 }
 
-/* 开机恢复（由启动器在主页创建后调用、以及 app 侧在 sdgoods_app_shell_init() 里调用；
- * NVS 无记录则保持出厂默认）。
- * 同样先 ensure：启动器不调 sdgoods_app_shell_init()，这条路径就是它唯一的 NVS 保障点。
+/* 开机恢复（由 app 侧在 sdgoods_app_shell_init() 里调用；NVS 无记录则保持出厂默认）。
+ * 先 ensure：本路径是 NVS 的首个保障点。
  *
- * ★ 这是音量/亮度**跨 app 同步**的唯一入口：每次「进 app」都是重启，能跨固件传递
- *   状态的只有 NVS，所以每个固件启动都必须走一遍这里。
- * ⚠️ 必须打日志（哪怕只是 INFO）：这条路径以前完全无声，于是「在 A 里调好的音量，
- *   进 B 又变回去了」这种问题在串口上**看不出任何迹象**，只能靠肉眼比对屏幕。
- *   现在两侧都会打 `restore: vol=.. bri=..`，跨 app 的一致性可以直接用日志断言。 */
+ * ★ 这是音量/亮度**跨重启保存**的唯一入口：本工程每次唤醒深睡都是冷启动，
+ *   能跨固件传递状态的只有 NVS，所以固件启动都必须走一遍这里。
+ * ⚠️ 必须打日志（哪怕只是 INFO）：这条路径无声时，「调好的音量重启后丢了」
+ *   这类问题在串口上**看不出任何迹象**，只能靠肉眼比对屏幕。现在会打
+ *   `restore: vol=.. bri=..`，一致性可直接用日志断言。 */
 void sdgoods_cc_settings_restore(void)
 {
     sdgoods_nvs_ensure();
@@ -551,19 +550,13 @@ void sdgoods_cc_settings_restore(void)
              (int)s_bri_user, has_bri ? "" : "(no record)", CC_NVS_NS);
 }
 
-/* 「用户设定的亮度」的公开访问点 —— 给**启动流程**用（sdgoods_boot.c）。
+/* 「用户设定的亮度」的公开访问点 —— 返回用户意图值而非背光瞬时值。
  *
  * 为什么需要它、以及为什么返回 s_bri_user 而不是 sdgoods_lcd_get_backlight()：
- *   软复位（含「从 app 回启动器」）的快路径顺序是「先建主页 → 再亮屏」，而建主页内部
- *   会调 sdgoods_cc_settings_restore() **把用户亮度应用上去了**；启动流程如果紧接着
- *   再 set_backlight(80)，就把刚恢复的用户值又覆盖掉 ⇒ 表现为「每次回启动器亮度都是 80%」。
- *   冷启动走的是开机动画路径，restore 在 set_backlight(80) **之后**，顺序相反 ⇒ 看起来正常，
- *   这正是该 bug 长期没被发现的原因。
- *   直接问「用户设定的亮度是多少」再点亮，两条路径就都对了。
+ *   背光瞬时值会被熄屏/关机/深睡前压到 0，拿它去点屏等于把「临时熄灭」当成用户偏好。
+ *   直接问「用户设定的亮度是多少」再点亮，就不会误覆盖刚恢复的用户值。
  *
- * ⚠️ 不能改用 sdgoods_lcd_get_backlight()：那是**瞬时值**，开机动画期 / 息屏期会是 0，
- *   拿它去点屏等于把「临时熄灭」当成用户偏好（黑屏事故的另一条路径）。
- *   无 NVS 记录时返回出厂默认 80（与 sdgoods_lcd_get_backlight() 为 0 不同）。 */
+ * ⚠️ 无 NVS 记录时返回出厂默认 80（与 sdgoods_lcd_get_backlight() 可能为 0 不同）。 */
 uint8_t sdgoods_cc_brightness_get(void)
 {
     return s_bri_user;
@@ -606,10 +599,10 @@ static void open_slider(const char *title, int min, int init, void (*apply)(int)
     s_slider_title = title ? title : "?";
     /* 打开时的**实时值**（亮度页传的是 sdgoods_lcd_get_backlight()）。
      * 为什么要打这一行：`slider[...] value -> N%` 只在**拖动时**触发，所以「当前实际亮度
-     * 是多少」在串口上是取不到的 —— 而「从 app 返回启动器后亮度变成 80」这类问题，
+     * 是多少」在串口上是取不到的 —— 而「重启后亮度变回 80」这类问题，
      * 唯一的机器可读判据就是它。没有它就只能靠肉眼看截图。 */
     /* 亮度页打上下限：真机排查「拖到最左端会不会黑屏」时，日志里必须能看出
-     * 这页的滑块是从 1 起的（init 还可能因为息屏/开机动画是 0，别把它当下限的证据）。 */
+     * 这页的滑块是从 1 起的（init 还可能因为息屏是 0，别把它当下限的证据）。 */
     ESP_LOGI(TAG, "slider page '%s' opened, init=%d%% (live), range=%d..100",
              s_slider_title, init, min);
 
@@ -653,10 +646,10 @@ static void open_slider(const char *title, int min, int init, void (*apply)(int)
     lv_slider_set_value(sl, init < min ? min : init, LV_ANIM_OFF);
     lv_obj_add_event_cb(sl, slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* 底部小横条：提示「从底部往上滑返回主页」 */
+    /* 底部小横条：提示「从底部往上滑关闭控制中心」 */
     make_bottom_hint(s_slider);
 
-    /* 从底部横条处上滑 → 直接返回主页（关闭滑块与一级控制中心） */
+    /* 从底部横条处上滑 → 直接关闭控制中心（关掉滑块与一级页，回到 DOOM） */
     sdgoods_swipe_up_bind(s_slider, sdgoods_cc_close);
 
     /* 从最左边起手左→右滑 → 返回上一级（一级控制中心） */
@@ -721,7 +714,7 @@ static void pwr_off_async(void *p)
     sdgoods_audio_bgm_stop();
     cc_settings_save();      /* 关机即断电：先把音量/亮度落盘 */
 
-    /* 宿主固件（单应用 / 启动器）关机：sdgoods_power_off() 内部已绘制 "Power Off"
+    /* 本工程（单应用）关机：sdgoods_power_off() 内部已绘制 "Power Off"
      * 覆盖层（背光拉亮 + 立即刷新 + 延时 800ms）再压暗背光、切断电池锁存；
      * 此处不再重复绘制，否则会与内部那次叠成两次显示（用户反馈：出现 2 次 Power Off）。 */
     sdgoods_power_off();                      /* 显示 "Power Off" → 压暗背光 → 延时 → 切断电池锁存（深度睡眠） */
@@ -793,8 +786,8 @@ static uint32_t sdgoods_app_image_size(void)
 #define SDG_BAT_V_MIN  3.00f
 #define SDG_BAT_V_MAX  4.28f
 
-/* 电池读数的**唯一**换算口径：控制中心「电量」页与启动器主页底部状态行共用。
- * 两处各写一份阈值迟早会漂移，届时同一块电池在两个界面显示不同百分比，很难查。
+/* 电池读数的**唯一**换算口径：控制中心内所有电量显示共用。
+ * 多处各写一份阈值迟早会漂移，届时同一块电池在不同界面显示不同百分比，很难查。
  * 返回 0~100 的百分比；读数失败（平台层返 0.f）返回 -1，并回填 *v_out = 0。
  * v_out 可传 NULL（只关心百分比时）。 */
 int sdgoods_cc_bat_read(float *v_out)
@@ -842,7 +835,7 @@ static void open_volt(void)
 
     /* 电池电压：平台层 sdgoods_hw_bat_v() 读 ADC1_CH7（含 x3 分压换算）返回伏特，
      * 打开本页时采样一次即可（ADC 单次转换，无需连续刷新）。
-     * 换算走共用函数，与启动器主页底部状态行同口径。
+     * 换算走共用函数，与电量页其他显示同口径。
      * 注意：读数失败时返回 -1，此时显示 "--" 而不是 0%，避免被误读成没电。 */
     float v = 0.0f;
     int pct = sdgoods_cc_bat_read(&v);
@@ -864,13 +857,13 @@ static void open_volt(void)
         lv_label_set_text(l, vlines[i]);
         lv_obj_set_style_text_font(l, &si_yuan_black_icon_16, 0);
         lv_obj_set_style_text_color(l, lv_color_white(), 0);
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, -28 + i * 40);   /* 与数据页行距口径一致 */
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, -28 + i * 40);   /* 行距与控制中心其他页一致 */
     }
 
-    /* 底部小横条：提示「从底部往上滑返回主页」 */
+    /* 底部小横条：提示「从底部往上滑关闭控制中心」 */
     make_bottom_hint(s_volt);
 
-    /* 从底部横条处上滑 -> 直接返回主页（关闭电量页 + 一级控制中心） */
+    /* 从底部横条处上滑 -> 直接关闭控制中心（关掉电量页 + 一级页，回到 DOOM） */
     sdgoods_swipe_up_bind(s_volt, sdgoods_cc_close);
 
     /* 从最左边起手左->右滑 -> 返回上一级（控制中心） */
@@ -1005,7 +998,7 @@ static void open_set(void)
 
     make_bottom_hint(s_set);
 
-    /* 从底部横条处上滑 → 直接返回主页（关掉设置页 + 一级控制中心） */
+    /* 从底部横条处上滑 → 直接关闭控制中心（关掉设置页 + 一级页，回到 DOOM） */
     sdgoods_swipe_up_bind(s_set, sdgoods_cc_close);
     /* 从最左边起手左→右滑 → 只关设置页、回到一级控制中心 */
     sdgoods_swipe_back_bind(s_set, set_back);
@@ -1025,12 +1018,11 @@ void sdgoods_cc_close(void)
 {
     /* ⚠️ 只有**真的关掉了一个开着的浮层**才落盘（2026-09-19 修）。
      *
-     * 旧实现无条件 `sdgoods_cc_flush()`。但本函数还有一个「非用户动作」的调用点：
-     * ui_launcher_create() 在删旧屏前必须先关浮层（否则 CC 的静态句柄成野指针），
-     * 而它**每次开机都会跑**。于是每次开机都会在「开机动画期间背光本来就是 0」的
-     * 时刻落盘一次 ⇒ NVS 里的亮度被写成 0 ⇒ 紧接着 `sdgoods_cc_settings_restore()`
-     * 又把这个 0 读回来 apply ⇒ **背光 0、屏幕全黑**（用户可见症状：开机黑屏 /
-     * 亮度在 app 之间「不同步」——因为它压根不是用户的亮度）。
+     * 旧实现无条件 `sdgoods_cc_flush()`。但本函数还有「非用户动作」的调用点（
+     * 如 `sdgoods_cc_debug_open()` 会先 close 再 open）；若在不该关的时候无条件落盘，
+     * 就可能把背光瞬时 0（息屏态）当作用户亮度写进 NVS ⇒ 下次
+     * `sdgoods_cc_settings_restore()` 又把这个 0 读回来 apply ⇒ 背光 0、屏幕全黑。
+     * 症状：开机黑屏 / 亮度被悄悄重置（因为它压根不是用户的亮度）。
      *
      * 真机日志特征（改前必现，可当作回归探针）：
      *   I (1252) cc: save: vol=70% bri=0 -> NVS ns='sdg_cc'
@@ -1039,8 +1031,8 @@ void sdgoods_cc_close(void)
      *
      * 语义上也本该如此：落盘的目的是「把用户在 CC 里挂起的调节先存下来」，
      * 没有开着的浮层就说明没有任何挂起调节。 */
-    if (s_cc || s_slider || s_volt || s_set) {
-        sdgoods_cc_flush();   /* 返回主页前落盘（避免随后立即断电丢最近调节） */
+    if (s_cc || s_slider || s_volt || s_about || s_set) {
+        sdgoods_cc_flush();   /* 关闭控制中心前落盘（避免随后立即断电丢最近调节） */
     }
     if (s_set) {
         lv_obj_del(s_set);
@@ -1119,7 +1111,7 @@ static void open_about(void)
         snprintf(szbuf, sizeof(szbuf), "--");
     }
 
-    /* 安装槽编号：仅多应用（从 ota_N 启动）显示；单应用不显示 */
+    /* 安装槽编号：仅当从 ota_N 分区启动时显示（本工程从 factory 分区启动，不显示） */
     char slotbuf[40];
     bool has_slot = false;
     const esp_partition_t *rp = esp_ota_get_running_partition();
@@ -1133,7 +1125,7 @@ static void open_about(void)
     /* ⚠️ 行缓冲放大到 64：l3/l4 由运行时值填充、长度不可静态推断，
      * 在 -Werror=format-truncation 下会判为「可能截断」而报错；加大到 64 即可消除。
      * 四行只显示值，不带 App/Ver/Build/Size 标签（2026-09-22 用户口径：删的是
-     * 前缀词，数值行保留——单/多应用一视同仁；Slot 行仍仅多应用显示）。 */
+     * 前缀词，数值行保留——不论从哪个分区启动都一视同仁；Slot 行仅从 ota_N 启动时显示）。 */
     char l1[64], l2[64], l3[64], l4[64];
     snprintf(l1, sizeof(l1), "%.20s", name);
     snprintf(l2, sizeof(l2), "v%s",   ver);
@@ -1160,7 +1152,7 @@ static void open_about(void)
              name, ver, bdate, btime, szbuf, has_slot ? slotbuf : "(no slot)");
 
     make_bottom_hint(s_about);
-    sdgoods_swipe_up_bind(s_about, sdgoods_cc_close);   /* 上滑直接回主页 */
+    sdgoods_swipe_up_bind(s_about, sdgoods_cc_close);   /* 上滑直接关闭控制中心 */
     sdgoods_swipe_back_bind(s_about, about_back);       /* 左滑回控制中心 */
     sdgoods_tap_normalize(s_about);
 }
@@ -1213,13 +1205,13 @@ void sdgoods_cc_open(void)
      * （轻则踩槽、重则点错按钮）。 */
     s_btn_l1_n = 3;
 
-    /* 底部小横条：提示「从底部往上滑返回主页」 */
+    /* 底部小横条：提示「从底部往上滑关闭控制中心」 */
     make_bottom_hint(s_cc);
 
-    /* 从底部横条处上滑 → 关闭控制中心（返回主页） */
+    /* 从底部横条处上滑 → 关闭控制中心（回到 DOOM） */
     sdgoods_swipe_up_bind(s_cc, sdgoods_cc_close);
 
-    /* 从最左边起手左→右滑 → 也返回主页（控制中心之上即主页） */
+    /* 从最左边起手左→右滑 → 也关闭控制中心（一级页之上即 DOOM） */
     sdgoods_swipe_back_bind(s_cc, sdgoods_cc_close);
 
     /* 全局手势策略（放在最后：按钮 / caption / 底部横条都已创建）：

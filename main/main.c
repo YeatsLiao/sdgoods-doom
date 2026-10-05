@@ -82,8 +82,8 @@ void app_main(void)
 
     sdgoods_key_init();
 
-    /* 界面语言：出厂默认英文，用户可在 DEMO 页切换（存 NVS，重启保留）。
-       必须在任何界面创建之前调用 —— 首屏是在 sdgoods_ui_home_create_show() 里创建的。 */
+    /* 界面语言：出厂默认英文，用户可在控制中心切换（存 NVS，重启保留）。
+       必须在任何界面创建之前调用 —— 首屏（DOOM）是在下方 ui_doom_start() 里创建的。 */
     sdg_i18n_init();
 
     /* LVGL 移植 + 触摸 + 硬件信息 */
@@ -96,7 +96,7 @@ void app_main(void)
     ESP_ERROR_CHECK(sdgoods_audio_init());
 
     /* 中文 fallback 已在编译期写入 si_yuan 图标字体的 .fallback 字段
-       （见 components/sdgoods_board/fonts/si_yuan_black_icon_*.c），
+       （见 components/bsp/fonts/si_yuan_black_icon_*.c），
        不可在运行时写 const 字体结构体，否则会触发 ESP32 flash Cache 错误。 */
 
     /* ★ 接线：单应用直启——把 DOOM 的逐帧 poll 与电源键短按钩子直接注册给平台层。
@@ -104,9 +104,8 @@ void app_main(void)
     sdgoods_apps_set_poll(ui_doom_poll);
     sdgoods_set_power_short_handler(doom_power_short_handler);
 
-    /* 直接进入首屏：本工程(app0)不再单独播开机动画 —— 设备开机动画由 Launcher 在上电时
-       负责，从 Launcher 启动 app0 时若再播一遍会重复。先建好首屏并刷新一帧，再点亮背光，
-       避免 LCD 复位后的白屏闪烁。 */
+    /* 直接进首屏：本工程为单应用直启，不播开机动画（无启动器 / Launcher）。先建好首屏并刷新一帧，
+       再点亮背光，避免 LCD 复位后的白屏闪烁。 */
     ui_doom_start();
     lv_refr_now(NULL);
     sdgoods_lcd_set_backlight(60);   /* 出厂默认亮度 60%（与 sdgoods_cc.c 的 s_bri_user 一致） */

@@ -60,9 +60,8 @@ esp_err_t sdgoods_hw_info_init(void)
 {
     /* ⚠️ 两条硬约束（2026-09-19 改，都踩过）：
      *
-     * ① **必须幂等**。现在有两个调用点会走到这里：
-     *    · 平台层的应用外壳 sdgoods_app_shell_init()（让**每个** app 自动拿到电池读数）；
-     *    · 部分固件自己的 app_main（启动器 launcher_main.c、app0 main.c 都显式调过）。
+     * ① **必须幂等**。主调用点是平台层的应用外壳 sdgoods_app_shell_init()（启动时
+     *    统一调一次）；上层固件若也显式调不得重入而挂。
      *    旧实现用 `ESP_ERROR_CHECK(adc_oneshot_new_unit(...))`，第二次调用会因
      *    ESP_ERR_INVALID_STATE 直接 abort() ⇒ 开机即挂。所以先判 s_adc。
      *

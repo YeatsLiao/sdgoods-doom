@@ -10,7 +10,7 @@
 
 | 阶段 | 内容 | 风险 | 状态 |
 |---|---|---|---|
-| A | 架构裁剪与整理（删 WiFi/BLE、清死注释、修 CI、重写 README、删 AI 草稿） | 低 | 待做 |
+| A | 架构裁剪与整理（删 WiFi/BLE、清死注释、修 CI、重写 README、删 AI 草稿） | 低 | 已完成 |
 | **B** | **DOOM 音效（SFX 优先，音乐后置）** | 中 | **进行中** |
 | C | 通用 DOOM 播放器（撑 mmap 窗口 + lump 注入，玩不同 IWAD/PWAD） | 中高 | 待做 |
 
@@ -29,9 +29,9 @@
 
 ## 1. 阶段 A：架构裁剪（已验证安全性）
 
-**保留**（CC 与运行必需）：`sdgoods_board` 核心（lcd / lvgl / input-touch / power / hw_info /
-nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `sdgoods_launcher`（CC
-+ 应用枚举）+ `doom` + `jpegenc`。
+**保留**（CC 与运行必需）：`bsp`（原 `sdgoods_board`）核心（lcd / lvgl / input-touch / power / hw_info /
+nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `control_center`（原 `sdgoods_launcher`，
+仅余 CC）+ `doom_engine`（原 `doom`）+ `jpegenc`。
 
 **可删 / 可关**：
 - 🟢 **WiFi + BLE**：全工程仅 `main.c` 两行 `sdgoods_wifi_init()` / `sdgoods_ble_init()`，
@@ -40,13 +40,13 @@ nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `sdgood
   - 动作：去 2 行 init；board CMakeLists 去 `sdgoods_wifi.c`/`sdgoods_ble.c` + `esp_wifi`/`bt`
     REQUIRES；`sdkconfig*` 去 `CONFIG_BT_*`；main/CMakeLists 去 `esp_wifi`/`esp_netif`/`bt`。
 - 🟢 **截屏** `sdgoods_screenshot`：Kconfig 开关（`CONFIG_SDGOODS_SCREENSHOT`），关。
-- 🟡 **launcher 多槽**（slot_manifest / slot_cover / device_mode）：CC 的"应用枚举"磁贴仍在用，
-  删它要连 CC 磁贴一起改，风险中 → **阶段 A 先不动**。
-- 🧹 应用层**模板死注释**（引用不存在的 `ui_home.c`/`app_template.c`/`new_app_project.py`）清理。
-- 🧹 **CI 修正**：`.github/workflows/build.yml` + `release.yml` 里引擎分支 `esp32-ai-passport`
-  → 应为 `esp32-sdgoods`；`release.yml` 的 `DOOM1_PROCESSED.WAD` → 应为 `DOOM1_GBA.WAD`。
-- 🧹 删 `docs/superpowers/plans/*.md`（AI 草稿）；重写 `README.md`（现状：canvas 336×200 而非
-  304×168；按键为半透明白色等大圆键、按住式 latch=false、无拖拽点击层，README 描述已过时）。
+- ✅ **launcher 多槽**（slot_manifest / slot_cover / device_mode）：已随平台框架剥离一并移除
+  （本工程单应用，CC 不再做"应用枚举"磁贴）。
+- 🧹 应用层**模板死注释**（引用不存在的 `ui_home.c`/`app_template.c`/`launcher_main.c`/`slot_manifest.c` 等）—— 已清理。
+- 🧹 **CI 修正**（已完成）：`.github/workflows/build.yml` + `release.yml` 引擎分支 `esp32-ai-passport` → `esp32-sdgoods`。
+  ❗ `release.yml` 的 WAD **保留 `DOOM1_PROCESSED.WAD`**（切勿改为 GBA 版——`DOOM1_GBA.WAD` 的关卡为 GBA 专有格式，
+  会让引擎 `P_GroupLines` 崩溃；见 README 与记忆）。
+- 🧹 删 `docs/superpowers/plans/*.md`（AI 过程草稿）—— 已移出仓库；`README.md` 已按四层新布局 + 分层架构图重写。
 
 **验证**：每步 `idf.py -B build_pub build` 编译通过 + 刷 COM6 冒烟（进 DOOM、CC 可下拉、音量滑条可用）。
 
@@ -84,7 +84,7 @@ nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `sdgood
      `doom_sfx_index.h`（`{ data_offset, sample_count, rate }` 按 sfx_id 对齐，未命中的置空）。
 2. **soundbank 存放**（待定，见 §2.6）——推荐**追加进 appdata 分区、WAD 之后**（与阶段 C 的
    "撑大 mmap 窗口"合并考虑），避开 3MB launcher 分区装不下（2.05MB app + 1.17MB = 3.22MB > 3MB）。
-3. **新后端** `components/doom/i_sound_esp32.c`（替换 i_audio.c 在 ESP32 的角色；CMakeLists 里
+3. **新后端** `components/doom_engine/i_sound_esp32.c`（替换 i_audio.c 在 ESP32 的角色；CMakeLists 里
    排除 `i_audio.c`）：
    - `I_InitSound()`：初始化混音（打开功放、置音量）。
    - `I_StartSound(id, ch, vol, sep)`：把通道 `ch` 指向 soundbank 条目，记 position=0/长度/vol/sep/active。
@@ -92,7 +92,7 @@ nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `sdgood
      → 16-bit、按 `vol` 缩放、按 `sep` 做左右声道 pan、`11025→16000` 定点重采样 → 立体声 int16 缓冲
      → 写 I2S。**复用板载 `sdgoods_audio` 的 I2S0 TX + PA + 音量**（见下）。
    - `I_PlaySong`/`I_SetMusicVolume` 等：先空实现（音乐后置）。
-4. **I2S 接入**（推荐）：给 `sdgoods_board` 的 `sdgoods_audio` 增加一个通用 PCM 写入口
+4. **I2S 接入**（推荐）：给 `bsp` 的 `sdgoods_audio` 增加一个通用 PCM 写入口
    （如 `sdgoods_audio_write_pcm(const int16_t *stereo, size_t frames)`，内部走已建好的 `s_tx`
    + PA 逻辑），DOOM 混音任务调它。好处：功放时序/防爆音/音量缩放都复用平台成熟代码。
 5. **音量 / 静音联动 CC**：混音缩放读取 `sdgoods_audio_get_volume()`（CC 滑条的 `s_vol_pct`）。
@@ -118,7 +118,7 @@ nvs / audio / app_shell / swipe_up / swipe_back / tap / i18n / fonts）+ `sdgood
 ---
 
 ## 3. 阶段 C：通用 DOOM 播放器（多 WAD）
-- 现状 `components/doom/esp32_wad.c` mmap appdata 头 4.25MB 并校验 `"IWAD"`。
+- 现状 `components/doom_engine/esp32_wad.c` mmap appdata 头 4.25MB 并校验 `"IWAD"`。
 - 要做：① 撑 mmap 窗口到分区上限（DOOM2/Ultimate ~11MB，需 32-bit flash mmap，最大到 appdata 16MB）；
   ② **lump 注入工具**——引擎硬依赖 GBA UI 补丁 lump（`STGANUM0-9`/`M_ARUN`/`M_GAMMA`），
   纯净 IWAD 缺这些会崩，须脚本注入（或对缺失做回退）；③ 支持 `-file` 加 PWAD（多段 mmap）；
