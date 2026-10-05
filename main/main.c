@@ -17,7 +17,7 @@
  *
  * 这个文件属于**应用层**：它决定「用哪些应用、首屏是什么、怎么接线」。
  * 平台能力（屏 / 触摸 / 电源键 / 音频 / 应用框架 / 字体）
- * 全部来自 components/sdgoods_board，用一行 `#include "sdgoods_board.h"` 拿到。
+ * 全部来自 components/bsp，用一行 `#include "bsp.h"` 拿到。
  *
  * 想加自己的应用？（在本仓库内加演示应用）照着 main/apps/app_template.c 手写，
  * 再参考 main/apps/apps_registry.c 的「新增一个应用」三步；要独立开发并上架自己的应用，
@@ -30,7 +30,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "sdgoods_board.h"    /* 平台层：板级支持包总入口 */
+#include "bsp.h"              /* 硬件抽象层：板级支持包总入口 */
 #include "apps_registry.h"    /* 应用层：应用清单与首屏接线 */
 #include "ui_doom.h"           /* 应用层：boot-direct 直启首屏（DOOM） */
 #include "build_version.h"    /* 自动生成：版本号 + SDGOODS 品牌信息 */

@@ -21,7 +21,7 @@ project(SDGOODS_DOOM)
 # 幂等；随源码提交，保证 CI 干净 checkout GBADoom 后也得一致固件。
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/components/doom/patch_gbadoom.py
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/components/doom_engine/patch_gbadoom.py
             ${GBADOOM_PATH}/source/z_zone.c
     RESULT_VARIABLE _doom_patch_rc
     OUTPUT_VARIABLE _doom_patch_out

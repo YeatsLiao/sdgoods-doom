@@ -43,7 +43,7 @@ idf_component_register(
     REQUIRES
         esp_partition
         spi_flash
-        sdgoods_board   # i_sound_esp32.c 用 sdgoods_audio_* 推流（I2S0 TX + 功放 + 音量）
+        bsp   # i_sound_esp32.c 用 sdgoods_audio_* 推流（I2S0 TX + 功放 + 音量）
     PRIV_REQUIRES
         esp_timer
         log

@@ -36,7 +36,7 @@
 
 #include <stddef.h>
 
-#include "sdgoods_board.h"   /* 平台层：sdgoods_apps_set_poll / sdgoods_ui_set_nav */
+#include "bsp.h"   /* 硬件抽象层：sdgoods_apps_set_poll / sdgoods_ui_set_nav */
 #include "sdgoods_hooks.h"   /* sdgoods_set_power_short_handler：电源键「一级返回」钩子 */
 
 /* ---- 导航页（不算应用，但也要轮询） ---- */         /* 根页面（首页：6 个功能按钮平铺） */

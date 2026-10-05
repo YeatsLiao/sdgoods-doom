@@ -1,8 +1,8 @@
 # main/ —— 应用层（二次开发主要在这里）
 #
-# 平台层（屏 / 触摸 / 音频 / LVGL 移植 / 应用框架 / 字体）是独立组件：
-#   components/sdgoods_board/
-# 应用层通过 REQUIRES sdgoods_board 使用它，一行 #include "sdgoods_board.h" 即可。
+# 硬件抽象层（屏 / 触摸 / 音频 / LVGL 移植 / 应用框架 / 字体）是独立组件：
+#   components/bsp/
+# 应用层通过 REQUIRES bsp 使用它，一行 #include "bsp.h" 即可。
 
 idf_component_register(
     SRCS
@@ -10,20 +10,18 @@ idf_component_register(
 
         # --- 应用层小工具（不注册成「应用」，只被 main.c / 页面调用） ---
         # （纯 DOOM 工程：app_data_store 已删——appdata 分区头部被 WAD 裸数据占用，不可挂 FAT）
-        # --- 应用注册表（新增应用要在这里接线） ---
-        "apps/apps_registry.c"
-        
-        # --- 游戏 ---
-        "apps/ui_doom.c"
+        # --- 游戏接线（应用注册表 + DOOM 首屏） ---
+        "game/apps_registry.c"
+        "game/ui_doom.c"
 
     INCLUDE_DIRS
-        "apps"                  # 让 #include "ui_home.h" 直接可用
+        "game"                  # 让 #include "ui_doom.h" 直接可用
         "."                     # 让 #include "app_data_store.h" 直接可用
 
     REQUIRES
-        doom
-        sdgoods_board
-        sdgoods_launcher
+        doom_engine
+        bsp
+        control_center
         driver
         esp_event
         esp_netif
@@ -38,7 +36,7 @@ idf_component_register(
 
 # ---- 自动编译版本号 (MMDDHHMM)，每次编译刷新 ----
 # 生成 build_version.h 到组件构建目录，并让组件库在编译前依赖它，
-# 同时把构建目录加入头文件搜索路径，使 apps/ui_home.c 能 #include "build_version.h"。
+# 同时把构建目录加入头文件搜索路径，使 game/ 下的源文件能 #include "build_version.h"。
 set(_bv_dir ${CMAKE_CURRENT_BINARY_DIR})
 add_custom_target(gen_build_version ALL
     COMMAND ${CMAKE_COMMAND}

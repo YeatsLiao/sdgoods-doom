@@ -1,7 +1,7 @@
 # 谷仓共创计划 · 谷仓 SDGOODS 开放平台基础工程
 # 平台层 vendored 组件：JPEG 编码器（bitbank2/JPEGENC，Apache-2.0）
 #
-# 仅用于设备端截屏：把 RGB565 直接编码成 JPEG（见 components/sdgoods_board/src/sdgoods_jpeg.cpp）。
+# 仅用于设备端截屏：把 RGB565 直接编码成 JPEG（见 components/bsp/src/sdgoods_jpeg.cpp）。
 # 上游：https://github.com/bitbank2/JPEGENC  (Copyright 2021 BitBank Software, Inc.)
 # 许可证：Apache-2.0（与本项目平台层一致）。
 

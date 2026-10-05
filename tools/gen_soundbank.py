@@ -105,7 +105,7 @@ def main():
     with open(bin_path, "wb") as f:
         f.write(blob)
 
-    hdr_path = os.path.join(out_dir, "components", "doom", "doom_sfx_index.h")
+    hdr_path = os.path.join(out_dir, "components", "doom_engine", "doom_sfx_index.h")
     os.makedirs(os.path.dirname(hdr_path), exist_ok=True)
     with open(hdr_path, "w", encoding="utf-8") as f:
         f.write("/* 由 tools/gen_soundbank.py 自动生成，勿手改。\n"

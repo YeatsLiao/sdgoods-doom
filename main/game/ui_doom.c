@@ -16,7 +16,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "sdgoods_board.h"
+#include "bsp.h"
 #include "sdgoods_tap.h"
 #include "doom_host.h"
 

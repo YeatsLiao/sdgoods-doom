@@ -15,15 +15,18 @@
 #pragma once
 
 /*
- * sdgoods_board.h —— 谷仓次元屏 / 谷仓电子徽章 板级支持包（BSP）总入口
+ * bsp.h —— 谷仓次元屏 / 谷仓电子徽章 板级支持包（BSP）总入口
+ *
+ * （本组件由官方平台基座 components/sdgoods_board 重命名而来；内部各子系统
+ *   头文件名与 sdgoods_ 函数符号保持不变，仅目录名与本伞形头改名。）
  *
  * 设备：ESP32-S3-R8 + 360x360 圆形 ST77916 QSPI 屏 + CST816 电容触摸
  *
  * 二次开发建议
  * ------------
- * · 应用代码请放在 main/apps/ 下；新建应用用 `tools/new_app_project.py <name>`
+ * · 应用代码请放在 main/game/ 下；新建应用用 `tools/new_app_project.py <name>`
  *   派生独立工程（见 skill sdgoods-new-app），或复制 app_template.c/.h 改名后手动注册。
- * · 这个目录（components/sdgoods_board）是平台层：引脚、屏驱动、LVGL 移植、
+ * · 这个目录（components/bsp）是硬件抽象层：引脚、屏驱动、LVGL 移植、
  *   触摸、音频、应用框架。**一般不需要改**，除非你要换硬件或改平台行为。
  * · 唯一鼓励改的文件是 include/board_pins.h（引脚定义）。
  * · 平台大缓冲要显式申请 PSRAM（heap_caps_malloc + MALLOC_CAP_SPIRAM）；

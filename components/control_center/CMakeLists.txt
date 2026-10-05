@@ -5,7 +5,7 @@ idf_component_register(
         "include"
     REQUIRES
         app_update
-        sdgoods_board
+        bsp
         driver
         esp_app_format
         esp_partition
@@ -16,7 +16,7 @@ idf_component_register(
         lvgl
 
     # ⚠️ 必须 WHOLE_ARCHIVE：控制中心（sdgoods_cc.c）要成为**每个 app 的默认能力**，
-    # 而 BSP 侧只能通过弱符号 sdgoods_cc_open 去调它（sdgoods_launcher 依赖 sdgoods_board，
+    # 而 BSP 侧只能通过弱符号 sdgoods_cc_open 去调它（control_center 依赖 bsp，
     # 反向直接依赖会成环）。C 静态库只按「未定义符号」拉取成员对象 —— 若不整档链接，
     # 一旦没有别的代码引用 sdgoods_cc_* ，sdgoods_cc.o 就不会进链接，
     # 弱默认空实现被当成最终实现 ⇒ **app 里控制中心静默失效**（最难查的一类问题）。
