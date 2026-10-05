@@ -2508,13 +2508,6 @@ CONFIG_SDGOODS_SCREENSHOT=y
 # end of SDGOODS Board (BSP)
 
 #
-# SDGOODS Launcher (multi-app dynamic slots)
-#
-CONFIG_SDGOODS_APP_SLOTS=4
-CONFIG_SDGOODS_APP_SLOT_BYTES=3145728
-# end of SDGOODS Launcher (multi-app dynamic slots)
-
-#
 # LVGL configuration
 #
 CONFIG_LV_CONF_SKIP=y

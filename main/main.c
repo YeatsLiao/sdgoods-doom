@@ -31,7 +31,6 @@
 #include "freertos/task.h"
 
 #include "sdgoods_board.h"    /* 平台层：板级支持包总入口 */
-#include "sdgoods_launcher.h" /* 平台层：多应用动态插槽（开机自校验 + 孤儿清理） */
 #include "apps_registry.h"    /* 应用层：应用清单与首屏接线 */
 #include "ui_doom.h"           /* 应用层：boot-direct 直启首屏（DOOM） */
 #include "build_version.h"    /* 自动生成：版本号 + SDGOODS 品牌信息 */
@@ -124,17 +123,6 @@ void app_main(void)
     ui_doom_start();
     lv_refr_now(NULL);
     sdgoods_lcd_set_backlight(60);   /* 出厂默认亮度 60%（与 sdgoods_cc.c 的 s_bri_user 一致） */
-
-    /* ⚠️ 这里**不要**调 sdgoods_launcher_boot_check()（2026-09-19 移除，别再加回来）。
-     *    它是**启动器宿主**的职责：扫槽 → 以 flash 为准校正 manifest → 清理孤儿 appdata。
-     *    app 固件在两种模式下都不该做，而且会真出事：
-     *      · MULTI（被启动器装进 ota_N）：manifest 是启动器的簿记对象，app 改写它 = 越权，
-     *        还会与 otadata 错位；
-     *      · SINGLE（自己就是主机固件）：本机没有「已装槽」⇒ 孤儿清理把**本 app 自己的
-     *        appdata 目录**当成孤儿删掉（每次开机删一次）。
-     *    平台层已加权限闸门（`deny_unless_host`）兜底：非宿主调用会返回
-     *    ESP_ERR_INVALID_STATE 并打一条 ERROR 日志，所以留着也只会刷一条错误日志。
-     *    启动器自己的 main.c（launcher_main.c）里有这个调用，那才是正确位置。 */
 
     sdgoods_app_shell_init();   /* 应用标准框架（共享音量等），须在 sdgoods_audio_init 之后 */
 

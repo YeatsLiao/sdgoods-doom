@@ -1,11 +1,6 @@
 idf_component_register(
     SRCS
-        "src/slot_manifest.c"
-        "src/slot_cover.c"       # 槽尾保留区里的主页封面图（见 sdgoods_slot_cover.h 的格式表）
-        "src/app_sdk.c"
-        "src/launcher.c"
-        "src/device_mode.c"
-        "src/sdgoods_cc.c"       # 控制中心：设备级统一系统浮层（启动器与所有 app 共用）
+        "src/sdgoods_cc.c"       # 控制中心：独立单应用游戏（DOOM）的系统浮层（只剩这一功能）
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -15,9 +10,6 @@ idf_component_register(
         esp_app_format
         esp_partition
         esp_system
-        fatfs
-        wear_levelling
-        mbedtls
         nvs_flash
         log
         freertos
