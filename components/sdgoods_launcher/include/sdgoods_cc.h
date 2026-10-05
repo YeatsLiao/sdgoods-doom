@@ -13,16 +13,14 @@
  */
 
 /*
- * sdgoods_cc.h —— 控制中心（Control Center）：**设备级统一系统浮层**，启动器与所有 app 共用
+ * sdgoods_cc.h —— 控制中心（Control Center）：**独立单应用游戏（DOOM）定制版系统浮层**
  *
  * 从当前屏「顶部下滑」唤出（`sdgoods_app_shell_bind()` 已自动接好手势，见 sdgoods_tap.h）：
- *   - Volume / Brightness（圆形图标按钮）→ 二级滑块页，可滑动实时调节
- *   - Data   → 二级信息页（插槽 / `RAM Free` / `MEM Free`，全部实测）
- *   - Battery→ 二级信息页（`Voltage x.xxV` + `Level nn%`）
- *   - 第 5 个按钮按「本固件是不是被启动器管理的 app」二选一（见 sdgoods_device_mode.h）：
- *       · 被管理 app（从 ota_N 启动）      → **Exit**：返回启动器（重启才回得去）
- *       · 启动器宿主 / 单应用主机固件（factory）→ **Power**：直接断电关机
- *   一级页底部另有小字显示设备启动模式（`Mode SINGLE` / `Mode MULTI`）。
+ *   - 一级页 3 键：Settings / About / Power。
+ *   - Settings 二级页 3 键：Volume / Brightness（各进滑块页，可滑动实时调节）+ Battery（二级信息页
+ *     `Voltage x.xxV` + `Level nn%`）。
+ *   - About 报固件名 / 版本 / 编译时间 / 镜像大小；Power 直接断电关机。
+ *   （多应用启动器相关的 Data 槽位页、Exit 回启动器、SINGLE/MULTI 模式小字已随启动器机制一并移除。）
  *
  * 二级页交互：从底部横条处上滑直接关闭控制中心；从最左边起手左→右滑返回上一级；
  * 电源键短按在任意页先关闭浮层（见 sdgoods_input.c）。
@@ -45,7 +43,7 @@ void sdgoods_cc_open(void);
 void sdgoods_cc_close(void);
 
 /* 调试用（串口控制台钩子，供真机离线截图核验，不参与正常交互流程）：
- *   which = 0 → 控制中心一级页；1 → 数据二级页；2 → 电量二级页；
+ *   which = 0 → 控制中心一级页；2 → 电量二级页；
  *           3 → 音量滑块页；4 → 亮度滑块页。
  * 任意任务可调用：内部走 lv_async_call 转到 LVGL 线程执行。 */
 void sdgoods_cc_debug_open(int which);
@@ -83,13 +81,12 @@ int sdgoods_cc_bat_read(float *v_out);
 bool sdgoods_cc_power_short(void);
 
 /* ---- 应用上下文（按当前 app 定制控制中心）----------------------------------
- * 控制中心是启动器与所有 app 共用的设备级统一浮层，但某些 app（如小鸟游戏）希望在使用时
- * 屏蔽部分系统按钮、并把第 5 键改成「返回主页」而不是关机 / 退出启动器。
+ * 某些 app（如小鸟游戏）希望在使用时屏蔽部分系统按钮、并把一键改成「返回主页」。
  * 由应用层在进入 / 离开该 app 时调用设置；平台层通用逻辑据此调整布局，
  * 不把具体 app 的细节写死在控制中心里。DEFAULT 表示标准控制中心。 */
 typedef enum {
-    SDGOODS_CC_CTX_DEFAULT = 0,  /* 标准：6 按钮全显示；第 5 键按设备模式选 Power / Exit */
-    SDGOODS_CC_CTX_BIRD,        /* 小鸟游戏：隐藏 Data / Battery / About；第 5 键 → 返回主页 */
+    SDGOODS_CC_CTX_DEFAULT = 0,  /* 标准：Settings / About / Power 三键 */
+    SDGOODS_CC_CTX_BIRD,        /* 小鸟游戏：Volume / Brightness / Home 三键 */
 } sdgoods_cc_app_ctx_t;
 
 /* 设置控制中心的应用上下文（0 / DEFAULT 恢复标准行为）。由应用层调用。 */

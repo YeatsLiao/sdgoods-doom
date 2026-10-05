@@ -12,14 +12,12 @@
  * 只需保留本声明并携带 NOTICE 文件。详见 LICENSING.md。
  */
 
-/* 控制中心（Control Center）实现 —— **设备级统一系统浮层**，启动器与所有 app 共用。
+/* 控制中心（Control Center）实现 —— 本工程为**独立单应用游戏**（DOOM）定制版。
  *
- * 顶部下滑唤出 → 5 个圆形图标按钮：上排 Volume / Brightness / Data，
- * 下排左对齐 Battery / 第 5 个按钮。点击 Volume、Brightness 进二级滑块页（可滑动实时调节）；
- * Data 进数据页；Battery 进电量页；第 5 个按钮按 sdgoods_device_is_managed_app() 二选一：
- *   · 被管理 app（从 ota_N 启动）        → Exit ：返回启动器（重启才回得去）
- *   · 启动器宿主 / 单应用主机固件（factory）→ Power：关机
- * 一级页底部另有小字显示设备启动模式（`SINGLE` / `MULTI`，不带 "Mode" 前缀）。
+ * 顶部下滑唤出 → 一级页 3 个圆形按钮：Settings / About / Power。
+ * Settings 进二级页（3 键）：Volume / Brightness（各进滑块页，可滑动实时调节）+ Battery（进电量页）；
+ * About 报固件名 / 版本 / 编译时间 / 镜像大小；Power 关机。
+ * （多应用启动器相关的 Data 槽位页、Exit 回启动器、SINGLE/MULTI 模式小字已随启动器机制一并移除。）
  *
  * 圆屏约束：所有内容落在 360 直径圆内；浮层本身做 360×360 方块，四角天然不可见。
  * 圆形按钮的图标用 LVGL 画布在运行时绘制（白色线条 + 透明底），按钮内不放任何文字；
@@ -27,7 +25,6 @@
  */
 
 #include "sdgoods_cc.h"
-#include "sdgoods_device_mode.h"
 
 #include "esp_app_desc.h"      /* esp_app_get_description：单应用模式下报「当前 app 名」 */
 #include "esp_log.h"
@@ -43,10 +40,6 @@
 #include "sdgoods_swipe_up.h"   /* sdgoods_swipe_up_bind：底部上滑返回主页 */
 #include "sdgoods_swipe_back.h"  /* sdgoods_swipe_back_bind：左→右返回上一级 */
 
-#include "esp_heap_caps.h"       /* heap_caps_get_free_size：RAM 统计 */
-#include "esp_vfs_fat.h"         /* esp_vfs_fat_info：读 appdata 空闲容量 */
-#include "sdgoods_launcher.h"    /* 插槽数 / 已装 app 枚举 */
-#include "sdgoods_app_sdk.h"     /* sdgoods_appdata_mount / unmount */
 #include "sdgoods_hw_info.h"     /* sdgoods_hw_bat_v：电池电压（ADC1_CH7） */
 #include "sdgoods_tap.h"         /* 全局手势策略：PRESS_LOCK + 点按位移守卫 */
 #include "sdgoods_app_shell.h"   /* sdgoods_app_shell_notify_overlay：浮层开/关 → app 暂停/恢复 */
@@ -304,7 +297,6 @@ static lv_obj_t *s_slider = NULL;
  * VALUE_CHANGED 日志原本都是同一句 `slider value -> N%`，串口上**分不出是哪一页**
  * ⇒ 「亮度的断言」实际可能被音量那行满足（假阳性）。带上下标就没有歧义了。 */
 static const char *s_slider_title = "?";
-static lv_obj_t *s_data = NULL;   /* 数据二级页（与滑块页平级，可同时存在） */
 static lv_obj_t *s_volt = NULL;   /* 电量二级页（同上） */
 static lv_obj_t *s_about = NULL;  /* 关于二级页 */
 static lv_obj_t *s_set = NULL;    /* 设置二级页（声音/亮度/数据/电池的收口页，与上面三者平级） */
@@ -765,40 +757,10 @@ static void on_vol_click(lv_event_t *e);
 static void on_bri_click(lv_event_t *e);
 static void on_pwr_click(lv_event_t *e);
 static void on_bat_click(lv_event_t *e);
-static void on_data_click(lv_event_t *e);
 
 static void tap_vol(void *ud)  { (void)ud; ESP_LOGI(TAG, "tap: Volume");     on_vol_click(NULL); }
 static void tap_bri(void *ud)  { (void)ud; ESP_LOGI(TAG, "tap: Brightness"); on_bri_click(NULL); }
 static void tap_pwr(void *ud)  { (void)ud; ESP_LOGI(TAG, "tap: Power");      on_pwr_click(NULL); }
-
-/* 「Exit」= 返回启动器。只有「被启动器装进 ota_N 并拉起的 app」才需要它：
- * 那类 app 是独立固件，重启后 bootloader 直接进该槽，不会自动回启动器，
- * 不给出口用户就「出不去」。与 tap_pwr 由第 5 个按钮的构建处二选一。 */
-static void exit_to_launcher_async(void *p)
-{
-    (void)p;
-    /* 先静音：从「正在播放声音的 app」跳转回启动器时，硬切会产生杂声（与关机同理）。
-     * 多应用模式下这一路直接跳启动器、不打任何文字（用户要求），故只做静音。 */
-    sdgoods_audio_bgm_stop();
-    cc_settings_save();            /* 重启即断电：先把音量/亮度落盘 */
-    /* 重启进启动器，正常路径不返回。
-     * ⚠️ 该调用有**模式闸门**（2026-09-19）：只有「被启动器管理的 app」才会真的重启，
-     *    否则返回 ESP_ERR_INVALID_STATE 且**不重启**。本按钮只在
-     *    sdgoods_device_is_managed_app() 为真时显示（见第 5 个按钮的构建处），所以
-     *    理论上到不了失败分支；真到了就留一条日志 —— 此时浮层还在，用户不会「按了黑屏」。 */
-    esp_err_t r = sdgoods_return_to_launcher();
-    if (r != ESP_OK) {
-        ESP_LOGE(TAG, "Exit refused: %s (mode=%s, boot=%s) -- staying in app",
-                 esp_err_to_name(r), sdgoods_device_mode_str(), sdgoods_device_boot_partition());
-    }
-}
-
-static void tap_exit(void *ud)
-{
-    (void)ud;
-    ESP_LOGI(TAG, "tap: Exit -> launcher");
-    lv_async_call(exit_to_launcher_async, NULL);
-}
 
 static void on_vol_click(lv_event_t *e)
 {
@@ -816,36 +778,6 @@ static void on_pwr_click(lv_event_t *e)
 {
     (void)e;
     lv_async_call(pwr_off_async, NULL);
-}
-
-/* ---- 数据二级页 ----------------------------------------------------------- */
-
-static void data_back(void)
-{
-    if (s_data) {
-        lv_obj_del(s_data);
-        s_data = NULL;
-    }
-}
-
-/* 低区未使用的 ota 槽空闲字节：枚举所有 app/ota 分区，累加其大小。
- * 单应用模式下这些槽一个 app 都没装 ⇒ 全部算空闲。运行分区本身排除。 */
-static uint64_t sdgoods_unused_slot_bytes(void)
-{
-    const esp_partition_t *run = esp_ota_get_running_partition();
-    uint64_t sum = 0;
-    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_APP,
-                                                    ESP_PARTITION_SUBTYPE_ANY, NULL);
-    for (; it != NULL; it = esp_partition_next(it)) {
-        const esp_partition_t *p = esp_partition_get(it);
-        if (p == run) continue;   /* 正在运行的那个分区本身不算空闲 */
-        if (p->subtype >= ESP_PARTITION_SUBTYPE_APP_OTA_0 &&
-            p->subtype <= ESP_PARTITION_SUBTYPE_APP_OTA_15) {
-            sum += p->size;
-        }
-    }
-    esp_partition_iterator_release(it);
-    return sum;
 }
 
 /* 运行时解析「当前运行分区」的 app 镜像，得到 .bin 大小（含尾部 16B SHA）。
@@ -873,126 +805,6 @@ static uint32_t sdgoods_app_image_size(void)
     }
     total += 16;                                   /* 追加的 SHA256（16B）计入 .bin 大小 */
     return total;
-}
-
-static void open_data(void)
-{
-    if (s_data) {
-        lv_obj_del(s_data);
-        s_data = NULL;
-    }
-    lv_obj_t *scr = lv_scr_act();
-    s_data = lv_obj_create(scr);
-    lv_obj_set_size(s_data, 360, 360);
-    lv_obj_set_pos(s_data, 0, 0);
-    lv_obj_set_style_bg_color(s_data, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_data, LV_OPA_COVER, 0);   /* 不透明：独立二级页 */
-    lv_obj_set_style_border_width(s_data, 0, 0);
-    lv_obj_set_style_pad_all(s_data, 0, 0);
-    lv_obj_clear_flag(s_data, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_move_foreground(s_data);
-
-    lv_obj_t *t = lv_label_create(s_data);
-    lv_label_set_text(t, "Data");
-    lv_obj_set_style_text_font(t, &si_yuan_black_icon_16, 0);
-    lv_obj_set_style_text_color(t, lv_color_white(), 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 40);   /* 与首页 / 控制中枢标题同高 */
-
-    /* 三项设备数据：插槽 / RAM / 存储空闲 */
-    int total = sdgoods_launcher_slot_count();
-    size_t ninst = 0;
-    sdgoods_slot_entry_t apps[SDGOODS_SLOT_COUNT_MAX];
-    sdgoods_launcher_list_installed(apps, SDGOODS_SLOT_COUNT_MAX, &ninst);
-
-    /* RAM：free 与 total 都由 heap_caps 实测（内部 SRAM 堆），不再使用任何写死常量。
-     * ⚠️ 旧版 total 写死成「物理 512KB」标称值 —— 那是个常量、测不出来，属于假数据；
-     * 已按用户要求（「data 里面的数据要是真实的」）改为实测堆总量。
-     * 口径说明：MALLOC_CAP_INTERNAL 的 total 只统计「可分配的堆区」，会排除 ROM 映像、
-     * .data/.bss 静态占用与 DMA 保留区，故略小于芯片标称 SRAM。free/total 同为实测口径，
-     * 二者相减即「当前已用堆」，比值才有意义。 */
-    uint32_t ram_free  = (uint32_t)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-    uint32_t ram_total = (uint32_t)(heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024);
-
-    /* 存储：appdata FAT 分区空闲容量（挂载失败或读取失败则显示 --） */
-    uint64_t st_total = 0, st_free = 0;
-    int st_ok = 0;
-    if (sdgoods_appdata_mount() == ESP_OK) {
-        st_ok = (esp_vfs_fat_info("/appdata", &st_total, &st_free) == ESP_OK);
-        sdgoods_appdata_unmount();
-    }
-
-    /* 单应用模式没有槽：低区 ota_0..3 分区（约 12MB）全部空闲，应计入「存储空闲」；
-     * 多应用模式下 ota 槽装着 app，不计入。运行分区本身（无论 factory 还是 ota_N）排除。 */
-    if (sdgoods_device_mode() == SDGOODS_MODE_SINGLE) {
-        uint64_t extra = sdgoods_unused_slot_bytes();
-        st_free  += extra;
-        st_total += extra;
-    }
-
-    /* 行内容按启动模式区分（2026-09-22 用户口径）：
-     *   MULTI  —— 三行：`Slot 已装 / 总槽`（启动器真实的簿记状态）+ RAM + MEM
-     *   SINGLE —— 两行：RAM + MEM。「当前跑的是哪个 app」这行删掉 ——
-     *             主页本身就在展示这个 app，再报一遍属于重复信息。 */
-    char l1[40], l2[40], l3[40];
-    const bool single = (sdgoods_device_mode() != SDGOODS_MODE_MULTI);
-    if (!single) {
-        snprintf(l1, sizeof(l1), "Slot %u / %d", (unsigned)ninst, total);
-    }
-    snprintf(l2, sizeof(l2), "RAM Free %u / %u KB", (unsigned)ram_free, (unsigned)ram_total);
-    if (st_ok) {
-        snprintf(l3, sizeof(l3), "MEM Free %.1f MB", (double)st_free / (1024.0 * 1024.0));
-    } else {
-        snprintf(l3, sizeof(l3), "MEM Free -- MB");
-    }
-
-    /* 日志同时打出未取整的原始值：便于把屏上数字与运行时真值逐字节核对，
-     * 确认页面上每一个数都是实测的、没有被常量替换掉。 */
-    ESP_LOGI(TAG, "data page (%s): %s | %s | %s", sdgoods_device_mode_str(),
-             single ? "(app name hidden)" : l1, l2, l3);
-    ESP_LOGI(TAG, "data raw: ram_free=%u ram_total=%u bytes | fat_free=%llu fat_total=%llu bytes | installed=%u/%d",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
-             (unsigned long long)st_free, (unsigned long long)st_total,
-             (unsigned)ninst, total);
-
-    if (single) {
-        /* 单应用：两行（RAM / MEM），行距与电量页一致（40px），整块视觉居中 */
-        const char *lines2[2] = { l2, l3 };
-        for (int i = 0; i < 2; i++) {
-            lv_obj_t *l = lv_label_create(s_data);
-            lv_label_set_text(l, lines2[i]);
-            lv_obj_set_style_text_font(l, &si_yuan_black_icon_16, 0);
-            lv_obj_set_style_text_color(l, lv_color_white(), 0);
-            lv_obj_align(l, LV_ALIGN_CENTER, 0, -28 + i * 40);
-        }
-    } else {
-        const char *lines[3] = { l1, l2, l3 };
-        for (int i = 0; i < 3; i++) {
-            lv_obj_t *l = lv_label_create(s_data);
-            lv_label_set_text(l, lines[i]);
-            lv_obj_set_style_text_font(l, &si_yuan_black_icon_16, 0);
-            lv_obj_set_style_text_color(l, lv_color_white(), 0);
-            lv_obj_align(l, LV_ALIGN_CENTER, 0, -48 + i * 40);
-        }
-    }
-
-    /* 底部小横条：提示「从底部往上滑返回主页」 */
-    make_bottom_hint(s_data);
-
-    /* 从底部横条处上滑 → 直接返回主页（关闭数据页 + 一级控制中心） */
-    sdgoods_swipe_up_bind(s_data, sdgoods_cc_close);
-
-    /* 从最左边起手左→右滑 → 返回上一级（控制中心） */
-    sdgoods_swipe_back_bind(s_data, data_back);
-
-    /* 全局手势策略（文字穿透 + 按下所有权锁定） */
-    sdgoods_tap_normalize(s_data);
-}
-
-static void open_data_async(void *p)
-{
-    (void)p;
-    open_data();
 }
 
 /* ---- 电量二级页（电池电压 + 电量百分比） ------------------------------------- */
@@ -1115,14 +927,6 @@ static void debug_open_cc_async(void *p)
     sdgoods_cc_open();
 }
 
-static void debug_open_data_async(void *p)
-{
-    (void)p;
-    sdgoods_cc_close();
-    sdgoods_cc_open();
-    open_data();
-}
-
 static void debug_open_volt_async(void *p)
 {
     (void)p;
@@ -1158,19 +962,10 @@ void sdgoods_cc_debug_open(int which)
     /* 串口命令来自 console RX 任务 ⇒ 必须投递到 LVGL 线程执行。
      * ⚠️ 用 sdgoods_lvgl_post()（不是 lv_async_call）：后者会与 LVGL 线程并发改
      *    同一条无锁定时器链表 ⇒ 崩溃，详见 sdgoods_lvgl.h。 */
-    sdgoods_lvgl_post(which == 1 ? debug_open_data_async
-                      : which == 2 ? debug_open_volt_async
+    sdgoods_lvgl_post(which == 2 ? debug_open_volt_async
                       : which == 3 ? debug_open_slider_async
                       : which == 4 ? debug_open_bri_async
                                    : debug_open_cc_async, NULL);
-}
-
-static void tap_data(void *ud) { (void)ud; ESP_LOGI(TAG, "tap: Data");       on_data_click(NULL); }
-
-static void on_data_click(lv_event_t *e)
-{
-    (void)e;
-    lv_async_call(open_data_async, NULL);
 }
 
 /* ---- 设置二级页 -----------------------------------------------------------
@@ -1217,28 +1012,18 @@ static void open_set(void)
 
     /* 图标槽从「一级页之后」重新分配，绝不回到 0 —— 一级页那 3 个按钮没被销毁、
      * 仍指着 [base, base+3) 的画布槽，回落就会把它们的图标就地改写掉（见 s_cc_icon_base 注释）。
-     * 设置页 4 键 ⇒ 用到 base+3..base+6，池子 8 足够（一级 3 + 设置 4 + 1 余量）。 */
+     * 设置页 3 键 ⇒ 用到 base+3..base+5，池子 8 足够。 */
     s_cc_icon_n = s_cc_icon_base + 3;
 
-    /* 点按守卫上下文：设置页 4 只按钮从一级页之后重新分配（不清零 ⇒ 一级页的槽仍安全）。
-     * 🔴 不重设这里就会踩「第二次打开设置页，4 只按钮全绑同一个槽」的 bug（见 CC_BTN_MAX 注释）。 */
+    /* 点按守卫上下文：设置页按钮从一级页之后重新分配（不清零 ⇒ 一级页的槽仍安全）。
+     * 🔴 不重设这里就会踩「第二次打开设置页，按钮全绑同一个槽」的 bug（见 CC_BTN_MAX 注释）。 */
     s_btn_ctx_n = s_btn_ctx_base + s_btn_l1_n;
 
-    /* 两行布局（x / 直径 68 与一级页同源，圆内几何已验证）：
-     *   上排：Volume / Brightness / Data（x = 84 / 180 / 276，cy = 130）
-     *   下排：Battery（x = 84 保持靠左，与首列对齐；cy = 230）
-     * 2026-09-27 用户口径：下排不居中（仍靠左），但要让**按钮块上下居中**。
-     * 按钮块（只算圆按钮，不含 caption）高 = 68×2 = 136，垂直居中 ⇒ 占 96..264（中心 180），
-     * 上排 cy = 96+34 = **130**、下排 cy = 264-34 = **230**。
-     * 两行圆心距 100 ⇒ 上排 caption 底 187、下排按钮顶 196，净空 9px，互不遮挡。
-     * 圆内校验：按钮最远点 |OC|+r —— (84,130) 96.6 距圆心… 取 (84,230)：
-     *   sqrt(96²+50²) = 108.2，+34 = 142.2 ✓ < 180；(276,230) 同 ✓；
-     * 下排 caption "Battery" 左下角约 (56,287)，距圆心 sqrt(124²+107²) = 163.8 ✓ < 180。
-     * 行距：上排 caption 底 = 130+34+6+17 = 187，下排按钮顶 = 196 ⇒ 净空 9px，不遮挡。 */
-    make_round_btn(s_set, 84,  130, 68, CC_ICON_VOL,  "Volume",     tap_vol,  NULL);
-    make_round_btn(s_set, 180, 130, 68, CC_ICON_BRI,  "Brightness", tap_bri,  NULL);
-    make_round_btn(s_set, 276, 130, 68, CC_ICON_DATA, "Data",       tap_data, NULL);
-    make_round_btn(s_set, 84,  230, 68, CC_ICON_BAT,  "Battery",    tap_bat,  NULL);
+    /* 一行 3 键（直径 68 与一级页同源，圆内几何已验证）：Volume / Brightness / Battery
+     * （x = 84 / 180 / 276，cy = 169 与一级页同一行几何）。 */
+    make_round_btn(s_set, 84,  169, 68, CC_ICON_VOL,  "Volume",     tap_vol,  NULL);
+    make_round_btn(s_set, 180, 169, 68, CC_ICON_BRI,  "Brightness", tap_bri,  NULL);
+    make_round_btn(s_set, 276, 169, 68, CC_ICON_BAT,  "Battery",    tap_bat,  NULL);
 
     make_bottom_hint(s_set);
 
@@ -1276,7 +1061,7 @@ void sdgoods_cc_close(void)
      *
      * 语义上也本该如此：落盘的目的是「把用户在 CC 里挂起的调节先存下来」，
      * 没有开着的浮层就说明没有任何挂起调节。 */
-    if (s_cc || s_slider || s_data || s_volt || s_set) {
+    if (s_cc || s_slider || s_volt || s_set) {
         sdgoods_cc_flush();   /* 返回主页前落盘（避免随后立即断电丢最近调节） */
     }
     if (s_set) {
@@ -1286,10 +1071,6 @@ void sdgoods_cc_close(void)
     if (s_volt) {
         lv_obj_del(s_volt);
         s_volt = NULL;
-    }
-    if (s_data) {
-        lv_obj_del(s_data);
-        s_data = NULL;
     }
     if (s_slider) {
         lv_obj_del(s_slider);
@@ -1471,9 +1252,7 @@ void sdgoods_cc_open(void)
          * 下排 caption 底 ≈226（底部 "SINGLE/MULTI" 小字在 y≈316，✓）。 */
         make_round_btn(s_cc, 84,  169, 68, CC_ICON_SET,  "Settings", tap_set, NULL);
         make_round_btn(s_cc, 180, 169, 68, CC_ICON_INFO, "About", tap_about, NULL);
-        const bool managed_app = sdgoods_device_is_managed_app();
-        make_round_btn(s_cc, 276, 169, 68, CC_ICON_PWR, managed_app ? "Exit" : "Power",
-                       managed_app ? tap_exit : tap_pwr, NULL);
+        make_round_btn(s_cc, 276, 169, 68, CC_ICON_PWR, "Power", tap_pwr, NULL);
     }
     /* 一级页实际占用的守卫槽数 —— 设置页的页基线就是 base + 它。
      * 上面两个分支（小鸟 3 键 / 标准 3 键）当前都是 3；**改动一级页按钮数时必须同步改这里**，
@@ -1482,17 +1261,6 @@ void sdgoods_cc_open(void)
 
     /* 底部小横条：提示「从底部往上滑返回主页」 */
     make_bottom_hint(s_cc);
-
-    /* 设备启动模式（单应用 / 多应用）：一级页底部小字，现场一眼确认本机跑在哪种模式。
-     * 判定口径见 sdgoods_device_mode.h（运行分区 + factory 内固件的身份，本地自证）。
-     * 位置：底部提示横条在 y=334，这里贴在它上方（y≈316），仍在 360 圆内
-     * （y=316 时可用半宽 ≈118px，文案约 70px 宽，安全）。 */
-    lv_obj_t *mode_lbl = lv_label_create(s_cc);
-    /* 只显示模式值本身（SINGLE / MULTI），不带 "Mode" 前缀 */
-    lv_label_set_text(mode_lbl, sdgoods_device_mode_str());
-    lv_obj_set_style_text_font(mode_lbl, &si_yuan_black_icon_14, 0);
-    lv_obj_set_style_text_color(mode_lbl, lv_color_hex(0x8E8E93), 0);
-    lv_obj_align(mode_lbl, LV_ALIGN_BOTTOM_MID, 0, -36);
 
     /* 从底部横条处上滑 → 关闭控制中心（返回主页） */
     sdgoods_swipe_up_bind(s_cc, sdgoods_cc_close);
@@ -1516,7 +1284,7 @@ void sdgoods_cc_open(void)
 
 bool sdgoods_cc_is_open(void)
 {
-    return s_cc != NULL || s_slider != NULL || s_data != NULL || s_volt != NULL || s_set != NULL;
+    return s_cc != NULL || s_slider != NULL || s_volt != NULL || s_set != NULL;
 }
 
 bool sdgoods_cc_power_short(void)
