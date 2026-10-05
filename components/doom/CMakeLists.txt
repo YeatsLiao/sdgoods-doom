@@ -18,17 +18,20 @@ file(GLOB DOOM_ALL_C "${GBADOOM_SRC}/*.c")
 #   i_main.c           - has main(), we use a dedicated FreeRTOS task
 #   i_system_gba.cpp   - GBA-only (#ifdef GBA)
 #   i_system_e32.cpp   - Windows/Qt implementation
-#   i_audio.c          - GBA maxmod audio (will revisit for ESP32 audio)
+#   i_audio.c          - GBA maxmod audio（现由 i_sound_esp32.c 取代：ESP32 原生混音）
 #   doom_iwad.c        - compile-time WAD embedding (we load from flash partition)
 list(FILTER DOOM_ALL_C EXCLUDE REGEX "i_main\\.c$")
 list(FILTER DOOM_ALL_C EXCLUDE REGEX "i_system_gba\\.cpp$")
 list(FILTER DOOM_ALL_C EXCLUDE REGEX "i_system_e32\\.cpp$")
-# i_audio.c is kept - all GBA audio code is behind #ifdef GBA, non-GBA stubs work fine
+# i_audio.c 排除：其逻辑全在 #ifdef GBA（maxmod）内，ESP32 上为空壳；
+# 由本目录 i_sound_esp32.c 提供同名 I_InitSound/I_StartSound/音乐接口。
+list(FILTER DOOM_ALL_C EXCLUDE REGEX "i_audio\\.c$")
 list(FILTER DOOM_ALL_C EXCLUDE REGEX "doom_iwad\\.c$")
 
 # ESP32 platform layer files (in this directory)
 set(ESP32_SRCS
     "i_system_sdgoods.c"
+    "i_sound_esp32.c"
     "esp32_wad.c"
 )
 
@@ -40,6 +43,7 @@ idf_component_register(
     REQUIRES
         esp_partition
         spi_flash
+        sdgoods_board   # i_sound_esp32.c 用 sdgoods_audio_* 推流（I2S0 TX + 功放 + 音量）
     PRIV_REQUIRES
         esp_timer
         log

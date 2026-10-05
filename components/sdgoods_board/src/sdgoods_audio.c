@@ -72,6 +72,7 @@ static volatile bool s_bgm_stopped;   /* BGM 任务已完全退出（PA/SPK 已�
 static volatile int s_flap_rem;     /* 拍翅音效剩余采样数（>0 时混合输出） */
 static float        s_flap_ph;      /* 拍翅音效相位累加器 */
 static bool         s_spk_inited;   /* 扬声器硬件（PA GPIO + I2S 通道）是否已初始化 */
+static bool         s_stream_run;   /* 通用 PCM 推流（DOOM 混音）是否活跃；与 bgm 共用 s_tx */
 static volatile int s_vol_pct = 10; /* 全局音量（0~100，默认 10%）；volatile：UI 线程改、BGM 任务读，防止编译器提升出循环 */
 
 /* 三套 8-bit 风格旋律；lead = 主旋律，bass = 低音伴奏 */
@@ -127,7 +128,7 @@ static void pa_set(bool on)
  * DAC/I2S 的静音底噪放大出来（用户反馈：静音后仍有杂音）。 */
 static void pa_apply(void)
 {
-    pa_set(s_bgm_run && s_vol_pct > 0);
+    pa_set((s_bgm_run || s_stream_run) && s_vol_pct > 0);
 }
 
 static inline int16_t sat16(int32_t s)
@@ -630,7 +631,7 @@ void sdgoods_audio_set_volume(int pct)
     }
     s_vol_pct = pct;
     pa_apply();   /* 音量归零立刻关功放，消除静音底噪；调大再开功放 */
-    ESP_LOGI("audio", "volume=%d%% -> PA %s", pct, (s_bgm_run && pct > 0) ? "ON" : "OFF");
+    ESP_LOGI("audio", "volume=%d%% -> PA %s", pct, ((s_bgm_run || s_stream_run) && pct > 0) ? "ON" : "OFF");
 }
 
 int sdgoods_audio_get_volume(void)
@@ -756,4 +757,53 @@ esp_err_t sdgoods_audio_play(void)
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * 通用游戏 PCM 推流（DOOM 混音任务调用）
+ * 复用已建好的 s_tx（I2S0 立体声 16bit @ RATE_HZ=16000）+ 功放时序 + 全局音量。
+ * 混音器自己按 get_volume() 缩放样本；本层只管把立体声帧推到 I2S 并管好功放开关。
+ * 与 bgm_* 互斥：DOOM 期从不启 bgm，故 s_tx 无争用。
+ * ------------------------------------------------------------------------- */
+esp_err_t sdgoods_audio_stream_open(void)
+{
+    if (s_bgm_run) {
+        sdgoods_audio_bgm_stop();   /* 保险：不与 BGM 抢同一发送通道 */
+    }
+    spk_hw_init();
+    if (!s_tx) {
+        return ESP_FAIL;
+    }
+    s_stream_run = true;
+    spk_set(true);
+    pa_apply();
+    return ESP_OK;
+}
+
+esp_err_t sdgoods_audio_stream_write(const int16_t *stereo, size_t frames)
+{
+    if (!s_tx || !s_stream_run || stereo == NULL || frames == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    size_t bw = 0;
+    return i2s_channel_write(s_tx, stereo, frames * 2 * sizeof(int16_t), &bw, portMAX_DELAY);
+}
+
+void sdgoods_audio_stream_close(void)
+{
+    if (!s_stream_run) {
+        return;
+    }
+    s_stream_run = false;
+    /* 冲一段静音把 DMA 里残留波形清干净，再关功放/通道，杜绝断电“啪”声 */
+    if (s_tx_on) {
+        memset(s_silence, 0, sizeof(s_silence));
+        for (int k = 0; k < 8; k++) {
+            size_t bw = 0;
+            (void)i2s_channel_write(s_tx, s_silence, sizeof(s_silence), &bw, pdMS_TO_TICKS(100));
+        }
+        vTaskDelay(pdMS_TO_TICKS(8));
+    }
+    pa_set(false);
+    spk_set(false);
 }

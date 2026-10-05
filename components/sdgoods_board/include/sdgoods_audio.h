@@ -42,3 +42,12 @@ void      sdgoods_audio_bgm_stop(void);    /* 停止 BGM 任务并关闭功放 *
 void      sdgoods_audio_sfx_flap(void);    /* 触发一次“拍翅”音效（仅在 BGM 运行时混合输出） */
 void      sdgoods_audio_set_volume(int pct); /* 设置全局音量（0~100），背景音与音效同步缩放 */
 int       sdgoods_audio_get_volume(void);    /* 读取当前音量（0~100） */
+
+/* ---------------------------------------------------------------------------
+ * 通用游戏 PCM 推流（DOOM 混音任务用）：复用本模块 I2S0 发送通道 s_tx + 功放
+ * 时序 + 全局音量。与 bgm_* 互斥（同一 s_tx），DOOM 期不启 bgm。功放开/关沿用
+ * pa_apply（需 stream_run 且 vol>0），避免静音底噪。
+ * ------------------------------------------------------------------------- */
+esp_err_t sdgoods_audio_stream_open(void);   /* 初始化并打开扬声器通道（幂等） */
+esp_err_t sdgoods_audio_stream_write(const int16_t *stereo, size_t frames); /* 写 frames 帧立体声 int16 */
+void      sdgoods_audio_stream_close(void);  /* 冲静音 + 关功放 + 关通道，防暴音 */
