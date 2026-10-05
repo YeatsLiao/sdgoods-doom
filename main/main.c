@@ -108,7 +108,7 @@ void app_main(void)
     sdgoods_app_shell_init();   /* 应用标准框架（共享音量等），须在 sdgoods_audio_init 之后 */
 
     /* ⚠️ 本工程不初始化 app_data_store：appdata 分区(0x1000000)头部 4.25MB
-       被 DOOM1_GBA.WAD 裸数据占用，由 components/doom/esp32_wad.c 直接 mmap，
+       被 DOOM1_PROCESSED.WAD 裸数据占用，由 components/doom/esp32_wad.c 直接 mmap，
        不可再挂 FAT（挂上会把 WAD 当文件系统目录区读坏）。单应用纯游戏也无持久数据需求。 */
 
     sdgoods_lvgl_loop();      /* 永不返回：sdgoods_power_key_poll + lv_timer_handler + apps_poll */
