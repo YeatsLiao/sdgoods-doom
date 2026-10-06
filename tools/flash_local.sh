@@ -6,7 +6,8 @@
 #   0x8000   <build>/partition_table/partition-table.bin（与 platform/partitions.csv 一致）
 #   0x10000  <build>/SDGOODS_DOOM.bin              （你刚编译出来的 app）
 #   0x310000 擦除 otadata                          （单应用直启，回落 factory）
-#   0x1000000 DOOM1_GBA.WAD                        （appdata 头部裸数据，完整原版+补丁）
+#   0x1000000 DOOM1_PROCESSED.WAD                  （appdata 头部裸关卡数据，必须 PROCESSED 版）
+#   0x1480000 DOOM_SFX.bin                         （appdata+0x480000 音效库，可选；不烧则静音）
 #
 # ⚠ bootloader 为什么不能用平台 prebuilt/：本工程把 WAD 裸烧在 appdata@0x1000000（16MB），
 #   esp_partition_mmap 读它需要 flash cache 开 32 位地址映射（CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH）。
@@ -126,13 +127,27 @@ run_esptool -p "$PORT" -b "$BAUD" --before=default_reset --after=no_reset \
 
 # 谷仓次元屏：WAD 烧进 appdata 分区头部（0x1000000，16MB），分区表不动。
 # 不挂 FAT，esp32_wad.c 直接 mmap 这段裸数据。
-WAD="$ROOT/DOOM1_GBA.WAD"
+# ⚠ 必须用 DOOM1_PROCESSED.WAD（1176 lumps，已转标准 seg/nodes + 含 STGANUM/M_GAMMA 补丁 lump）；
+#   烧 DOOM1_GBA.WAD 会让引擎 P_GroupLines 崩溃 → 黑屏。WAD/SFX 都不入库（id 版权），从 Releases 下载放仓库根。
+WAD="$ROOT/DOOM1_PROCESSED.WAD"
+SFX="$ROOT/DOOM_SFX.bin"
 if [ -f "$WAD" ]; then
-  echo "· 烧录 WAD -> 0x1000000 (appdata)"
-  run_esptool -p "$PORT" -b "$BAUD" --before=default_reset --after=hard_reset \
+  echo "· 烧录 WAD (PROCESSED) -> 0x1000000 (appdata)"
+  run_esptool -p "$PORT" -b "$BAUD" --before=default_reset --after=no_reset \
       write_flash 0x1000000 "$WAD" || { echo "✗ WAD 烧录失败" >&2; exit 1; }
 else
-  echo "· 跳过 WAD（仓库内无 DOOM1_GBA.WAD，屏上会报 WAD 未烧录）" >&2
+  echo "✗ 找不到 $WAD —— 没有它开机必黑屏。请从 Releases 下载 DOOM1_PROCESSED.WAD 放到仓库根再刷。" >&2
+  exit 1
+fi
+
+# 音效库（可选）：烧到 appdata+0x480000 = 绝对 0x1480000；不烧也能玩，只是静音（不影响画面）
+if [ -f "$SFX" ]; then
+  echo "· 烧录 SFX -> 0x1480000 (appdata+0x480000)"
+  run_esptool -p "$PORT" -b "$BAUD" --before=default_reset --after=hard_reset \
+      write_flash 0x1480000 "$SFX" || { echo "✗ SFX 烧录失败" >&2; exit 1; }
+else
+  echo "· 跳过 SFX（仓库根无 DOOM_SFX.bin，可静音运行）" >&2
+  run_esptool -p "$PORT" -b "$BAUD" --before=default_reset --after=hard_reset run
 fi
 
 echo
