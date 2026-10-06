@@ -105,8 +105,7 @@ sdgoods-doom/
 │   ├── main.c            开机直进 DOOM
 │   └── game/ui_doom.c    LVGL 外壳：canvas + 虚拟键 + 帧提交
 ├── platform/partitions.csv
-├── tools/                make_full_bin.py / gen_soundbank.py / screenshot_recv.py / flash_local.sh
-└── .github/workflows/    CI：clone GBADoom + 构建 + 挂 Release 资产
+└── tools/                make_full_bin.py / gen_soundbank.py / screenshot_recv.py / flash_local.sh
 ```
 
 ## License
