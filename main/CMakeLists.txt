@@ -46,22 +46,3 @@ add_custom_target(gen_build_version ALL
 )
 add_dependencies(${COMPONENT_LIB} gen_build_version)
 target_include_directories(${COMPONENT_LIB} PRIVATE ${_bv_dir})
-
-# ---- 应用第三方组件补丁（LVGL 的 GIF canvas 走 PSRAM 等）----
-# managed_components/ 不入库、由组件管理器下载，所以补丁放在 main/patches/ 随源码提交，
-# 每次 configure 幂等地覆盖过去 —— 保证「clone 后直接编译」得到与发布版一致的固件。
-# 详见 main/patches/README.md。该步失败会让 configure 直接报错（有意为之）。
-idf_build_get_property(_patch_python PYTHON)
-execute_process(
-    COMMAND ${_patch_python} ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_lvgl_patches.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
-    RESULT_VARIABLE _lvgl_patch_rc
-    OUTPUT_VARIABLE _lvgl_patch_out
-    ERROR_VARIABLE  _lvgl_patch_err
-)
-if(_lvgl_patch_out)
-    message(STATUS "${_lvgl_patch_out}")
-endif()
-if(NOT _lvgl_patch_rc EQUAL 0)
-    message(FATAL_ERROR "LVGL 补丁应用失败: ${_lvgl_patch_err}")
-endif()
