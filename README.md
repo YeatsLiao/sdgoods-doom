@@ -1,213 +1,322 @@
-# 谷仓次元屏 · DOOM（sdgoods-doom）
+# 在圆形触摸屏上玩 DOOM · sdgoods-doom
 
-> 把 **DOOM** 移植到 SDGOODS 谷仓次元屏（ESP32-S3 圆形触摸屏，无物理按键），
-> 用屏幕上的 **GBA 布局虚拟按键** 操作。独立单应用固件，开机直进游戏。
+把经典 **DOOM** 移植到 **SDGOODS 谷仓次元屏**（ESP32-S3 圆形触摸屏，只有一个电源键、没有方向键），
+用屏幕上的 **GBA 风格虚拟按键** 操作。这是一份**独立的单应用固件**——开机直接进游戏，不依赖任何启动器或多应用框架。
 
-这是从谷仓 SDGOODS 开放平台基础工程派生出的**纯 DOOM 工程**：只保留跑 DOOM 所需的
-平台 BSP（`components/bsp`、`components/control_center`、`components/jpegenc`）+ 引擎胶水层（`components/doom_engine`）+
-一个 LVGL 游戏外壳（`main/game`），官方模板示例（主页启动台 / 小鸟 / 扫描示例）、多应用注册表与发布链路脚本已全部剔除。
+| 标题画面 | 实机游玩（E1M1） |
+|:---:|:---:|
+| ![标题](screenshot/sdgoods-doom-title.jpg) | ![E1M1](screenshot/sdgoods-doom-e1m1.jpg) |
+
+> 约 **26 fps**、彩色 HUD、带音效，纯触屏单指可玩。
 
 ---
 
-## 硬件（谷仓电子徽章）
+## 目录
+
+- [它是什么 / 亮点](#它是什么--亮点)
+- [快速上手（拿到就能玩）](#快速上手拿到就能玩)
+- [操作说明](#操作说明)
+- [从零编译](#从零编译)
+- [烧录详解](#烧录详解)
+- [重新生成音效库](#重新生成音效库)
+- [抓取真机画面（截屏）](#抓取真机画面截屏)
+- [常见问题 FAQ](#常见问题-faq)
+- [给开发者：架构与目录](#给开发者架构与目录)
+- [后续方向](#后续方向)
+- [引用与致谢](#引用与致谢)
+- [许可与合规](#许可与合规)
+
+---
+
+## 它是什么 / 亮点
+
+- **真·DOOM，不是模拟器**：跑的是 DOOM 引擎（GBADoom，PrBoom 血统）+ 标准 DOOM WAD，不是"在 GBA 模拟器里放 DOOM"。
+- **为圆形触摸屏重做的操作**：单点触摸无法多指同按，所以按键全部改成"按住式"，方向/开火分置画面两侧，一根拇指就能打。
+- **开机即玩**：单应用直启，上电约 1 秒进标题画面，没有桌面、没有应用列表。
+- **带音效**：枪声、开门、怪物叫声都有（外置音效库，见下）。
+- **可远程验机**：设备能把当前画面经 USB 串口回传成图片，不用拿手机对着屏幕拍。
+
+### 硬件（谷仓电子徽章 / 次元屏）
 
 | 部件 | 型号 / 规格 |
 |---|---|
-| 主控 SoC | ESP32-S3-R8（双核 Xtensa LX7 @240MHz，内置 **8MB Octal PSRAM**） |
+| 主控 | ESP32-S3-R8（双核 LX7 @240MHz，**8MB Octal PSRAM**） |
 | 存储 | **32MB Flash**（QSPI） |
-| 显示屏 | 圆形 **360×360**，ST77916 驱动，QSPI，RGB565 |
-| 触摸 | **CST816** 单点电容触摸（I2C，支持滑动手势） |
-| 按键 | 仅 1 个电源键（无方向 / 动作键） |
-
-## 引擎与画面
-
-- 引擎：**GBADoom**（YeatsLiao fork 的 `esp32-sdgoods` 分支，PrBoom 血统，纯 C）
-- 内部分辨率 **240×160**、8bpp 调色板索引，本工程经最近邻放大到 canvas **336×200** 撑满圆屏（居中 @ (12,58)，仅四角被圆形外框裁掉一点）
-- 帧链路：引擎任务（core 0）渲染索引帧 → 置 `frame_ready` → LVGL 线程（apps_poll）转 RGB565 写 PSRAM canvas → `lv_obj_invalidate` → 平台 SRAM 条带 flush 上屏
-  - **不直刷 SPI**：绕开平台架构红线（QSPI DMA 缓冲不能取 PSRAM，否则黑条/红线）
-- WAD：**必须用 `DOOM1_PROCESSED.WAD`**（1176 lumps，3,904,360 字节）——它把关卡 `SEGS`/`NODES` 转回了**标准 DOOM 格式**（PrBoom 能解析），并保留引擎必需的 GBA UI 补丁 lump（`STGANUM0-9` HUD 数字 / `M_ARUN` / `M_GAMMA` 菜单项）。裸烧进 `appdata` 分区头部 `0x1000000`，`esp_partition_mmap` 固定 4.25MB 窗口直接读取，**不挂 FAT**。
-  - ⚠️ **不能用 `DOOM1_GBA.WAD`**：它的关卡数据是 GBA 专有格式，PrBoom 的 `P_LoadSideDefs2`/`P_GroupLines` 会读到错位数据（日志刷 `sidedef N has out-of-range sector num …`），一进关卡就 `I_Error: P_GroupLines: Subsector a part of no sector!` 崩溃——表现为标题画面能显示、但按键无反应、画面卡死。
-  - 音频：PROCESSED 与 GBA 版都**不含 `DS*`/`D_*` 音效/音乐 lump**（GBA 移植时删了）。音效由外部 `DOOM_SFX.bin` 提供（见“编译/烧录”），音乐尚未实现。
-  - 纯净 id 原版 `DOOM1.WAD` 也跑不了——引擎硬依赖 `STGANUM`/`M_ARUN`/`M_GAMMA` 这几个补丁 lump。
-
-## 输入：单指可玩的 GBA 虚拟键
-
-CST816 是单点触摸，无法同时按多键，故为"单指"重新设计：
-
-| 虚拟键 | 语义 | 触发方式 |
-|---|---|---|
-| ▲ ▼（十字键） | 前进 / 后退 | **按住**：按住才动、松手即停 |
-| ◀ ▶（十字键） | 左转 / 右转 | 按住 |
-| **A** | 开火（→ KEYD_B） | 按住 |
-| **B** | 使用 / 开门（→ KEYD_A） | 按住 |
-| L / R | 切换武器 | 按住 |
-| ST / SE | 菜单 / SELECT | 按住 |
-
-画面区**不挂手势**（转向用 ◀ ▶、开火用 A，单点触摸下更直观、避免误触）；全部按键为 `latch=false` 按住式。
-按键 ↔ 引擎键码经共享位掩码 `g_doom_host.btn_mask` 传递，引擎侧 `I_ProcessKeyEvents` 做边沿检测后 `D_PostEvent`。
+| 屏幕 | 圆形 **360×360**，ST77916，QSPI，RGB565 |
+| 触摸 | **CST816** 单点电容触摸（I2C，支持手势） |
+| 按键 | 仅 1 个电源键（**无物理方向 / 动作键**，全靠触屏虚拟键） |
 
 ---
 
-## 编译
+## 快速上手（拿到就能玩）
 
-依赖 ESP-IDF **v5.5** + GBADoom 源码树。
+如果你只想**尽快玩上**，不必自己编译——直接用发布好的成品，三步搞定：
+
+**① 下载**（都在本仓库的 [Releases](https://github.com/YeatsLiao/sdgoods-doom/releases) 页面）
+
+| 文件 | 说明 |
+|---|---|
+| `SDGOODS_DOOM.bin` | 游戏固件本体 |
+| `DOOM1_PROCESSED.WAD` | **必须用这个版本**的关卡数据（见 FAQ） |
+| `DOOM_SFX.bin` | 音效库（可选，不烧则静音运行） |
+
+> ⚠️ WAD 与音效库因含 id Software 版权素材，**不放进 git 仓库**，只作为 Release 资产提供——
+> 所以 `git clone` 下来是看不到这两个文件的，请从 Releases 下载。
+
+**② 烧录**（USB-C 接上设备，认准串口号，Windows 如 `COM6`）
 
 ```bash
-# 1) 放置 GBADoom（esp32-sdgoods 分支），与本工程同级即可
+# 固件（含自编引导层，见"烧录详解"为什么要自编）
+esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash \
+  0x0  bootloader.bin  0x8000 partition-table.bin  0x10000 SDGOODS_DOOM.bin
+# 擦 otadata → 让设备回落 factory 槽、开机直进 DOOM
+esptool.py --chip esp32s3 -p COM6 erase_region 0x310000 0x2000
+# 关卡数据 → appdata 头部
+esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash 0x1000000 DOOM1_PROCESSED.WAD
+# 音效库 → appdata+0x480000（可选）
+esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash 0x1480000 DOOM_SFX.bin
+```
+
+**③ 上电开玩**：按电源键开机 → 标题画面 → 用屏幕虚拟键操作。
+
+> 自己编译的话，`idf.py -B build_pub -p COM6 flash` 会一次性把固件+引导层+分区表都烧好，
+> 之后只需再手动烧 WAD（和可选的 SFX）+ 擦 otadata。详见 [从零编译](#从零编译) 与 [烧录详解](#烧录详解)。
+
+---
+
+## 操作说明
+
+CST816 是**单点触摸**（同一时刻只能感应一根手指），所以按键全按"单指、按住生效"设计：
+
+| 虚拟键 | 作用 | 怎么按 |
+|---|---|---|
+| ▲ ▼ | 前进 / 后退 | **按住**才动，松手即停 |
+| ◀ ▶ | 左转 / 右转 | 按住 |
+| **A** | 开火 | 按住 |
+| **B** | 使用 / 开门 | 按住 |
+| **L / R** | 切换武器 | 按住 |
+| **ST / SE** | 菜单 / 确认 | 按住 |
+
+- 按键排布仿 GBA：顶部窄行 `L SE ST R`，下方十字方向 + 两颗大圆键 `A / B`，半透明白浮在画面下沿。
+- **画面区不挂手势**——转向用 ◀ ▶、开火用 A，单指下更直观、不误触。
+- 顶部**向下滑**可唤出系统浮层（控制中心），调节音量 / 亮度等。
+- 电源键：游戏内短按用于唤出/收起浮层，无操作时熄屏。
+
+---
+
+## 从零编译
+
+依赖 **ESP-IDF v5.5** 和 **GBADoom 源码树**（`esp32-sdgoods` 分支）。
+
+```bash
+# 1) 取引擎源码：与本工程放在同级目录即可（也可用 -DGBADOOM_PATH 指定别的路径）
 git clone -b esp32-sdgoods https://github.com/YeatsLiao/GBADoom ../GBADoom
 
-# 2) 编译（默认找同级 ../GBADoom，也可用 -DGBADOOM_PATH 指定）
-. $IDF_PATH/export.sh
+# 2) 编译
+. $IDF_PATH/export.sh          # Windows PowerShell: . $env:IDF_PATH\export.ps1
 idf.py -B build_pub build
-#   路径不同：idf.py -B build_pub build -DGBADOOM_PATH=/path/to/GBADoom
+#   引擎在别处：idf.py -B build_pub build -DGBADOOM_PATH=/path/to/GBADoom
 ```
 
-> 构建期会自动对 GBADoom 的 `z_zone.c` 打一处**幂等补丁**（`components/doom_engine/patch_gbadoom.py`），
-> 把引擎的 128KB overflow 缓冲从内部 `.bss` 迁到 **PSRAM**——S3 内部 DRAM 要留给 LVGL 绘制缓冲
-> （必须在 SRAM）+ WiFi/BLE/音频，否则 `dram0` 链接溢出。补丁随源码提交，CI 干净 checkout 后同样生效。
+产物：`build_pub/SDGOODS_DOOM.bin`（约 1.3MB，须 ≤ 3MB 应用槽）。
 
-产物：`build_pub/SDGOODS_DOOM.bin`（约 2.1MB，须 ≤ 3MB 应用槽）。
-
-> ⚠️ **32 位 flash cache 是硬要求**：WAD 裸烧在 `appdata@0x1000000`（16MB），`esp_partition_mmap`
-> 读它需要 flash cache 开 32 位地址映射（`CONFIG_IDF_EXPERIMENTAL_FEATURES=y` +
-> `CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y`，已写进 `sdkconfig.defaults`）。
-> 该映射由**第二级 bootloader** 启动时启用，所以**必须烧本工程自编的 bootloader**（见下），
-> 不能用平台 `prebuilt/`（它没开这个，会退回 24 位寻址 → WAD 读不进 → 黑屏）。
-
-## 烧录（单应用直启 + WAD）
-
-```bash
-# 固件（idf.py flash 会烧本工程自编的 bootloader + 分区表 + app，含 32 位 cache 映射）
-idf.py -B build_pub -p <PORT> flash
-# 擦 otadata → 单应用直启（让 bootloader 回落 factory@0x10000）
-esptool.py --chip esp32s3 -p <PORT> erase_region 0x310000 0x2000
-# WAD → appdata 头部（必须 PROCESSED 版，非 GBA 版）
-esptool.py --chip esp32s3 -p <PORT> -b 921600 write_flash 0x1000000 DOOM1_PROCESSED.WAD
-# 音效库 → appdata+0x480000（DOOM_SFX.bin，由 tools/gen_soundbank.py 生成）
-esptool.py --chip esp32s3 -p <PORT> -b 921600 write_flash 0x1480000 DOOM_SFX.bin
-```
-
-> `idf.py flash` 默认就烧 `build_pub/bootloader/`（自编、含 32 位映射），**不要**手动改回平台
-> `prebuilt/bootloader.bin`。`tools/flash_local.sh` 也已改为使用 build 目录内的自编引导层。
-
-或一键（Linux/macOS）：`python tools/flash_local.sh -p <PORT> -B 921600`
-（该脚本已串好 固件 + 擦 otadata + 烧 WAD 三步）。
-
-分区表沿用平台托管版本，**不改动**：4 个 OTA 槽各 3MB + `appdata` 16MB @`0x1000000` + `otadata` @`0x310000`。
+> 构建期会自动做两件事，无需手动干预：
+> - 对 GBADoom 的 `z_zone.c` 打一处**幂等补丁**（`components/doom_engine/patch_gbadoom.py`），
+>   把引擎 128KB overflow 缓冲从内部 `.bss` 迁到 **PSRAM**——内部 SRAM 要留给 LVGL 绘制缓冲
+>   （必须在 SRAM）+ 音频，否则 `dram0` 链接溢出。补丁随源码提交，CI 干净 checkout 同样生效。
 
 ---
 
-## 截屏（抓取真机画面）
+## 烧录详解
 
-设备把当前屏用 JPEG 编码后经 USB 串口回传，PC 端落盘成图片——无需相机拍屏，可远程核验画面。
-工具：`tools/screenshot_recv.py`（固件侧由 `components/bsp/src/sdgoods_screenshot.c` 响应，串口收到字符 `'s'` 即触发）。
+```bash
+idf.py -B build_pub -p COM6 flash                       # 固件 + 自编引导层 + 分区表
+esptool.py --chip esp32s3 -p COM6 erase_region 0x310000 0x2000   # 擦 otadata → 直启 factory
+esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash 0x1000000 DOOM1_PROCESSED.WAD
+esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash 0x1480000 DOOM_SFX.bin   # 可选
+```
+
+或一键（Linux/macOS）：`python tools/flash_local.sh -p COM6 -B 921600`（已串好 固件 + 擦 otadata + 烧 WAD）。
+
+**两个必须理解的点：**
+
+1. **必须烧本工程自编的 bootloader**，不能用平台 `platform/prebuilt/` 那份。
+   WAD 裸烧在 `appdata@0x1000000`（16MB 处），`esp_partition_mmap` 读它需要 flash cache 开
+   **32 位地址映射**（`CONFIG_IDF_EXPERIMENTAL_FEATURES=y` + `CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH=y`，
+   已写进 `sdkconfig.defaults`）。这个映射由**第二级 bootloader** 启动时启用；平台 prebuilt 没开，
+   会退回 24 位寻址 → WAD 读不进 → **黑屏**。`idf.py flash` 默认就烧 `build_pub/bootloader/`（自编），别手动改回去。
+
+2. **分区表沿用平台托管版本，不改动**：`factory@0x10000`（3MB 应用槽）、`otadata@0x310000`、
+   4 个 OTA 槽、`appdata` 16MB FAT @`0x1000000`。本工程只占 `factory` 一个槽，其余空着。
+   WAD 烧在 appdata 头部，音效库烧在 appdata+`0x480000`。
+
+---
+
+## 重新生成音效库
+
+DOOM 的 `PROCESSED`/GBA 版 WAD 都**不含音效 lump**（当年 GBA 移植为省 ROM 把音频全删了），
+所以音效来自一份外置 soundbank，由 `tools/gen_soundbank.py` 从 GBADoom 的 `music/DS*.wav` 生成：
+
+```bash
+# 需先 clone GBADoom（含 music/ 素材），在本工程根目录执行：
+python tools/gen_soundbank.py
+# 产出：DOOM_SFX.bin（拼接 PCM）+ components/doom_engine/doom_sfx_index.h（按 sfx_id 对齐的索引表）
+# 再把 DOOM_SFX.bin 烧到 appdata+0x480000（见"烧录详解"）
+```
+
+> 音乐（BGM）尚未实现，属后续里程碑。
+
+---
+
+## 抓取真机画面（截屏）
+
+设备把当前屏 JPEG 编码后经 USB 串口回传，PC 落盘成图片——远程验机不用拍屏。
+工具 `tools/screenshot_recv.py`（固件侧收到串口字符 `'s'` 触发）。
 
 > ⚠️ 串口独占：截屏前**必须先关掉 `idf.py monitor` / 串口助手**，否则打不开端口。
 
 ```bash
-# 自动向串口发 's' 触发并接收一张（-t），存为 shot.jpg
-python tools/screenshot_recv.py -p COM6 -t -o shot.jpg
-
-# 查固件是否支持截屏能力（发 '?'，回 'SDGOODS-CAPS:SHOT,...'）
-python tools/screenshot_recv.py -p COM6 --caps
-
-# 连拍 3 张
-python tools/screenshot_recv.py -p COM6 -t -n 3 -o shot.jpg
-
-# 截「非首屏」界面：先发切换字符（如控制中心 'c'），等渲染好再截
-python tools/screenshot_recv.py -p COM6 --pre c --wait 1.5 -t -o cc.jpg
-
-# 无设备自检（只验证解析 + RGB565→PNG + JPEG 落盘管线）
-python tools/screenshot_recv.py --selftest
+python tools/screenshot_recv.py -p COM6 -t -o shot.jpg          # 触发并接收一张
+python tools/screenshot_recv.py -p COM6 --caps                  # 查固件是否支持截屏
+python tools/screenshot_recv.py -p COM6 -t -n 3 -o shot.jpg     # 连拍 3 张
+python tools/screenshot_recv.py -p COM6 --pre c --wait 1.5 -t -o cc.jpg   # 先切控制中心再截
+python tools/screenshot_recv.py --selftest                      # 无设备自检管线
 ```
-
-说明：
-- 传输协议为「文本头 `===SHOT-BEGIN ...===` + 定长原始二进制 + 文本尾 `===SHOT-END===`」，
-  设备端优先 JPEG（典型 20~50KB，约 2~5 秒），编码失败退回原始 RGB565（259KB，约 25 秒），故 `--timeout` 别设太短。
-- 只能截「当前显示的那一屏」；控制中心 / 二级页等要靠触摸才到的界面，用 `--pre <字符>` 先切过去再截。
-- 脚本会保持 DTR/RTS 为高，避免打开串口瞬间复位设备。
 
 ---
 
-## 分层架构
+## 常见问题 FAQ
 
-本工程剥离官方「平台应用框架」后只余四层，依赖自上而下单向（上层依赖下层，BSP 不反向硬依赖）：
+**Q：能显示标题画面，但按键没反应、一进关卡就卡死/崩溃？**
+几乎一定是**烧错了 WAD**。必须用 `DOOM1_PROCESSED.WAD`（1176 lumps，3,904,360 字节）——它把关卡
+`SEGS`/`NODES` 转回了标准 DOOM 格式，并保留引擎必需的 GBA UI 补丁 lump（`STGANUM0-9`/`M_ARUN`/`M_GAMMA`）。
+- ❌ **不能用 `DOOM1_GBA.WAD`**：关卡是 GBA 专有格式，PrBoom 的 `P_GroupLines` 会读到错位数据
+  （日志刷 `sidedef N has out-of-range sector num…`），一进关卡就 `I_Error: P_GroupLines: Subsector a part of no sector!` 崩溃。
+- ❌ 纯净 id 原版 `DOOM1.WAD` 也跑不了：引擎硬依赖上面那几个补丁 lump。
+
+**Q：开机黑屏、串口日志说 WAD 读不进 / mmap 失败？**
+八成是烧了平台 `prebuilt` 的 bootloader（没开 32 位 cache 映射）。改用本工程自编 bootloader
+（`idf.py flash` 默认行为），见[烧录详解](#烧录详解)第 1 点。
+
+**Q：完全没有声音？**
+- 确认烧了 `DOOM_SFX.bin` 到 `0x1480000`（不烧也能玩，只是静音）；
+- 确认音量不为 0（下滑控制中心看音量、或按电源键唤醒后调）；
+- 串口日志应出现 `doom_snd: soundbank loaded: … from appdata+0x480000` 与 `I_InitSound: DOOM SFX ready`。
+
+**Q：开火 / 使用两个键反了？**
+对调 `components/doom_engine/i_system_sdgoods.c` 里 `s_keymap` 的对应两行即可。
+
+**Q：这是 GBA 模拟器吗？能玩 GBA 游戏吗？**
+不是。`GBADoom` 是 **PrBoom 血统的 DOOM 引擎**（BOOM → id DOOM 1993），当年被编译到 GBA、如今重编译到 ESP32。
+它跑的是 **DOOM 的 WAD**，不是 GBA ROM。想玩 GBA 游戏是另一个项目（mGBa / RetroGBa 等）的事。
+
+---
+
+## 给开发者：架构与目录
+
+### 分层
+
+本工程剥离官方"平台应用框架"后只余四层，依赖自上而下单向（上层依赖下层，BSP 不反向硬依赖）：
 
 ```
 ┌─────────────────────────────────────────────┐
-│  game  —— main/game/ui_doom.c                 │  LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
+│  game —— main/game/ui_doom.c                  │  LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
 │  main/main.c：boot-direct 首屏直进 DOOM       │
 ├──────────────┬──────────────────────────────┤
-│ doom_engine  │  control_center               │  引擎胶水（GBADoom 契约/音频/WAD）  系统浮层（顶部下滑）
+│ doom_engine  │  control_center               │  引擎胶水（契约/音频/WAD）      系统浮层（顶部下滑）
 ├──────────────┴──────────────────────────────┤
-│  bsp  —— components/bsp（伞形头 bsp.h）          │  硬件驱动：LCD QSPI / CST816 / I2S / LVGL 移植 / JPEG / 电源 / 手势
+│  bsp —— components/bsp（伞形头 bsp.h）          │  硬件驱动：LCD QSPI / CST816 / I2S / LVGL 移植 / JPEG / 电源 / 手势
 └─────────────────────────────────────────────┘
 ```
 
-- **bsp**：板级支持包，只保留硬件驱动。通过弱符号（`sdgoods_cc_open` / `sdgoods_cc_is_open` / `sdgoods_cc_close` …）与上层解耦，不含 control_center 时仍可编译。
-- **control_center**：取代旧「主页启动台 + 应用内菜单」的唯一系统 UI（顶部下滑唤出），以强符号覆盖 bsp 的弱默认。
+- **bsp**：板级支持包，只保留硬件驱动。通过弱符号（`sdgoods_cc_open` / `sdgoods_cc_is_open` …）与上层解耦，不含 control_center 时仍可编译。
+- **control_center**：唯一系统 UI（顶部下滑唤出），以强符号覆盖 bsp 的弱默认。
 - **doom_engine**：GBADoom 引擎胶水层 + `doom_host.h` 契约（`btn_mask` / `frame_ready`）。
 - **game**：单应用外壳，`main.c` 直接接线轮询与电源键钩子（无多应用注册表）。
 
-## 目录结构
+### 画面链路
+
+引擎任务（core 0）以 **240×160 / 8bpp 调色板**渲染 → 置 `frame_ready` → LVGL 线程转 RGB565、最近邻放大写
+PSRAM canvas（**336×200**，居中 @ (12,58)，仅四角被圆形外框裁掉一点）→ `lv_obj_invalidate` → 平台 SRAM 条带 flush 上屏。
+**不直刷 SPI**：绕开平台架构红线（QSPI DMA 缓冲不能取 PSRAM，否则黑条/红线）。
+
+### 目录
 
 ```
 sdgoods-doom/
-├── CMakeLists.txt              # 定义 GBADOOM_PATH + 构建期打 GBADoom 补丁（引用 components/doom_engine/）
-├── DOOM1_PROCESSED.WAD         # 标准格式关卡 + GBA UI 补丁（引擎必需 lump；必须用此版，非 GBA 版）
-├── DOOM_SFX.bin                # 音效库（tools/gen_soundbank.py 生成，烧 appdata+0x480000）
+├── CMakeLists.txt              # 定义 GBADOOM_PATH + 构建期打 GBADoom 补丁
 ├── components/
-│   ├── bsp/                    #  ★ 平台 BSP（由官方 sdgoods_board 改名）：屏/触摸/音频/LVGL/字体/电源/手势 — 勿动
-│   │   └── include/bsp.h       #    伞形头（原 sdgoods_board.h）；内部子系统头仍按 sdgoods_*.h 命名
-│   ├── control_center/         #  ★ 控制中心（取代旧 launcher，由 sdgoods_launcher 改名）：顶部下滑系统浮层
-│   │   └── src/sdgoods_cc.c
-│   ├── doom_engine/            #  ★ 引擎组件（由 doom 改名；GBADoom 源码 + SDGOODS 平台层）
-│   │   ├── CMakeLists.txt      #    GLOB 引擎源 + 排除表 + --wrap=clock
+│   ├── bsp/                    #  平台 BSP（官方 sdgoods_board 改名）：屏/触摸/音频/LVGL/字体/电源/手势
+│   │   └── include/bsp.h       #    伞形头（内部子系统头仍按 sdgoods_*.h 命名）
+│   ├── control_center/         #  控制中心（由 sdgoods_launcher 改名）：顶部下滑系统浮层
+│   ├── doom_engine/            #  引擎组件（GBADoom 源码 + 平台层）
 │   │   ├── patch_gbadoom.py    #    构建期把 overflow 缓冲迁 PSRAM（幂等）
 │   │   ├── doom_host.h         #    引擎 ⇄ UI 唯一契约（btn_mask / frame_ready）
-│   │   ├── i_system_sdgoods.c  #    平台层：backbuffer(PSRAM)/调色板/键边沿检测
-│   │   ├── i_sound_esp32.c     #    ★ DOOM 音频后端：soundbank→PSRAM + 8 通道混音 + I2S 推流
+│   │   ├── i_system_sdgoods.c  #    backbuffer(PSRAM)/调色板/键边沿检测
+│   │   ├── i_sound_esp32.c     #    DOOM 音频后端：soundbank→PSRAM + 8 通道混音 + I2S
 │   │   └── esp32_wad.c         #    从 appdata mmap WAD
-│   └── jpegenc/
+│   └── jpegenc/                #    截屏 JPEG 编码
 ├── main/
-│   ├── main.c                  #   boot-direct 首屏直进 DOOM（直接轮询/电源键钩子）
-│   └── game/                   #   ★ 游戏外壳（原 main/apps，已去 apps_registry）
-│       └── ui_doom.[ch]        #     LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
+│   ├── main.c                  #   boot-direct 首屏直进 DOOM
+│   └── game/ui_doom.[ch]       #   LVGL 外壳：canvas + GBA 虚拟键 + 帧提交
 ├── platform/                   #   分区表 + 预编译引导层（平台托管，勿改）
-├── tools/gen_soundbank.py      #   音效库生成（GBADoom/music/*.wav → DOOM_SFX.bin + doom_sfx_index.h）
-├── tools/screenshot_recv.py    #   真机截屏接收端（见上文“截屏”）
-├── tools/flash_local.sh        #   本地一键烧录
-└── .github/workflows/          #   CI：clone GBADoom + -DGBADOOM_PATH 构建
+├── screenshot/                 #   本文档配图（真机截图 + GBA 致敬图）
+├── tools/
+│   ├── gen_soundbank.py        #   音效库生成（music/*.wav → DOOM_SFX.bin + 索引头）
+│   ├── screenshot_recv.py      #   真机截屏接收端
+│   └── flash_local.sh          #   本地一键烧录
+└── .github/workflows/          #   CI：clone GBADoom + 构建 + 挂 Release 资产
 ```
 
-## 真机验证结果（ESP32-S3 次元屏，COM6 实刷）
+> `DOOM1_PROCESSED.WAD` 与 `DOOM_SFX.bin` **不在仓库**（id 版权素材，见 FAQ），从 Releases 下载。
 
-固件已刷入真机并跑通，串口日志 + 截图实测确认：
+---
 
-- ✅ **WAD mmap 成功**：`doom_wad: WAD mmap ok: addr=0x1000000 map=4352KB`（PROCESSED 版，开 32 位 cache 后）。
-- ✅ **引擎启动**：`PrBoom / Playing: DOOM Shareware`，`W_Init`/`R_Init` 正常，`backbuffer 38400B @ PSRAM`。
-- ✅ **帧率 ~26 fps**：`doom_ui: 26 fps`（远超 12fps 目标，无需再降 canvas）。
-- ✅ **色彩正确**：截屏中 HUD 血量为红、护甲为绿——证明 `I_SetPallete_e32`
-  已按 `LV_COLOR_16_SWAP=y` 做了一次 bswap（平台 `sdgoods_screenshot.c` 注释印证 LVGL 缓冲高字节在前）。
-- ✅ **音效链路**：`doom_snd: soundbank loaded: 1216747 B from appdata+0x480000 (PSRAM)` +
-  `I_InitSound: DOOM SFX ready (out=16000Hz)`；音量 100% 时 `audio: volume=100% -> PA ON`。
-- ✅ **GBA 虚拟键布局**：顶部窄行 L/SE/ST/R + 6 颗等大圆键（十字方向 + A/B），半透明白浮于画面下沿。
+## 后续方向
 
-待用户上手验收（截图/日志无法验证的部分）：
+- **通用 DOOM 播放器**：撑大 mmap 窗口 + lump 注入工具，让它能刷不同 IWAD / 加载 PWAD
+  （引擎硬依赖 `STGANUM`/`M_ARUN`/`M_GAMMA` 补丁 lump，纯净 IWAD 需脚本注入或回退）。
+- **音乐（BGM）**：DOOM 音乐是 DMXMusic(OPL)，ESP32 播放需模块播放器或 OPL 软合成，较重，暂缓。
+- 游戏内退出到桌面、BLE 手柄、上架开放平台商店。
 
-- **触摸手感**：按住方向键移动 + 按 A 开火是否顺手（单点触摸下无法多指同按）。
-- **实际听感**：进游戏按 A 开火 / 开门 / 受击是否有声、音量是否合适（软件链路已通，喇叭出声需人耳确认）。
-- **A/B 语义**：若开火/使用反了，对调 `i_system_sdgoods.c` 的 `s_keymap` 两行。
-- **MVP 未做**：音乐（BGM）、游戏内退出到桌面、BLE 手柄、上架开放平台商店。
+---
 
-## 许可
+## 引用与致谢
 
-- **引擎相关**（`components/doom_engine/*` + 链接的 GBADoom）：GBADoom/DOOM 引擎为 **GPL-2.0-or-later**，
-  合并固件产物按 GPL 条款分发。
-- **平台 BSP 组件**（`components/bsp`、`components/control_center`、`components/jpegenc`）：**Apache-2.0**，
-  版权归深圳希德创新网络有限公司（SDGOODS）。
-- **应用/游戏外壳**（`main/*`）：源自 SDGOODS 基础工程，Apache-2.0 声明见文件头；随 GPL 引擎合并后整体按 GPL 分发。
-- **`DOOM1_PROCESSED.WAD`**：游戏数据，版权归 **id Software**。本仓库沿用 passport 做法，仅以
-  **shareware（DOOM1）版本**随固件分发，供合法试用；请自行通过官方渠道获取，勿用于商业分发。
+本固件是站在许多前人作品肩膀上做出来的，特此致谢与标注来源：
 
+- **DOOM / id Software**：原版游戏与关卡数据（1993）。本项目的 WAD 基于 id 放出的 **shareware（DOOM1）** 版本。
+- **GBADoom**（YeatsLiao fork 的 `esp32-sdgoods` 分支）：把 DOOM 引擎带到掌机/嵌入式平台的移植工程，本项目的引擎基座。
+- **PrBoom / BOOM**：GBADoom 的引擎血统（id DOOM → BOOM → PrBoom），提供兼容层与特性。
+- **SDGOODS 谷仓开放平台**：ESP32-S3 次元屏的板级支持（LCD QSPI / CST816 触摸 / I2S 音频 / LVGL 移植 / JPEG / 电源 / 手势），
+  即 `components/bsp`、`components/control_center`、`components/jpegenc`，**Apache-2.0**，版权归深圳希德创新网络有限公司。
+- **LVGL 8.3.11**（MIT）：图形与触摸交互。
+- **ESP-IDF 5.5 / Espressif**（Apache-2.0）：SoC 固件框架。
+- 字体、图标等素材见各组件文件头声明。
+
+> 本项目与 SDGOODS / 谷仓官方**无隶属关系**，仅使用该硬件平台并保留其代码的 Apache-2.0 版权与许可声明。
 > 项目名、产品名与 SDGOODS 标识不在代码许可授权范围内。
+
+### 引擎血统致敬
+
+`GBADoom` 当年把 DOOM 塞进了 Game Boy Advance；本项目把同一条引擎链路搬到了圆形触摸屏上。
+下面这张是 DOOM 在 GBA 掌机上运行的实拍，作为"从 GBA 到次元屏"的血统注脚：
+
+![GBA 上的 DOOM（致敬）](screenshot/gbadoom-hardware.jpg)
+
+---
+
+## 许可与合规
+
+本工程是"多许可混合"，按目录区分：
+
+| 部分 | 许可 | 版权 |
+|---|---|---|
+| `components/doom_engine/` + 链接的 GBADoom | **GPL-2.0-or-later** | GBADoom / PrBoom / BOOM / id Software |
+| `components/bsp`、`components/control_center`、`components/jpegenc` | **Apache-2.0** | 深圳希德创新网络有限公司（SDGOODS） |
+| `main/*`（应用 / 游戏外壳） | Apache-2.0 声明见文件头；随 GPL 引擎合并后**整体产物按 GPL-2.0 分发** | — |
+| `DOOM1_PROCESSED.WAD` / `DOOM_SFX.bin` | 游戏数据，**版权归 id Software**，仅作合法试用分发 | id Software |
+
+- 合并后的固件产物按 **GPL-2.0-or-later** 条款分发，完整文本见 [`LICENSE`](LICENSE)。
+- 第三方组件的原始许可与版权头**均予保留**，详见各文件头与 [`NOTICE`](NOTICE)。
+- WAD 与音效库含 id Software 版权素材，**不纳入 git 仓库**，仅以 shareware 版本经 Releases 提供，请自行通过官方渠道获取，勿用于商业分发。

@@ -1,0 +1,58 @@
+sdgoods-doom — NOTICE
+=====================
+
+本文件列出本工程的第三方来源、版权归属与许可声明。清洗代码结构不等于抹除版权：
+以下组件的原始许可与版权声明均予保留，请随分发一并保留本文件。
+
+
+1. 平台 BSP（板级支持包）
+-------------------------
+目录：components/bsp、components/control_center、components/jpegenc
+许可：Apache License 2.0
+版权：深圳希德创新网络有限公司（SDGOODS / 谷仓开放平台）
+
+这些文件源自 SDGOODS 谷仓开放平台的基础工程，本工程在其上做了"单应用 DOOM"裁剪
+（剥离多应用启动器 / 应用框架 / 官方示例，仅保留硬件驱动与控制中心浮层）。
+组件目录与伞形头做了改名（sdgoods_board → bsp、sdgoods_launcher → control_center），
+但内部源文件与 sdgoods_* 符号沿用原始命名，文件头保留各自的 Apache-2.0 声明。
+完整 Apache-2.0 文本见 components/bsp/LICENSE。
+
+
+2. DOOM 引擎
+------------
+目录：components/doom_engine（+ 外部链接的 GBADoom 源码树，esp32-sdgoods 分支）
+许可：GNU General Public License v2.0 or later
+来源：GBADoom（YeatsLiao fork）→ PrBoom → BOOM → id Software DOOM (1993)
+
+引擎静态链接进固件，因此合并后的固件产物整体按 GPL-2.0-or-later 分发（见 LICENSE）。
+
+
+3. LVGL 图形库
+--------------
+来源：managed_components/lvgl__lvgl（由 ESP-IDF 组件管理器按 dependencies.lock 下载）
+版本：8.3.11
+许可：MIT License
+版权：LVGL Kft / 贡献者
+
+
+4. ESP-IDF 框架
+---------------
+来源：Espressif ESP-IDF v5.5（target: esp32s3）
+许可：Apache License 2.0
+版权：Espressif Systems
+
+
+5. 游戏数据（WAD / 音效）
+-------------------------
+文件：DOOM1_PROCESSED.WAD、DOOM_SFX.bin
+版权：游戏素材版权归 id Software。
+说明：本工程仅基于 id 放出的 DOOM shareware（DOOM1）版本，供合法试用；这些二进制
+      含 id Software 版权素材，不纳入 git 仓库，仅经 GitHub Releases 提供，
+      请自行通过官方渠道获取，勿用于商业分发。
+      DOOM_SFX.bin 由 tools/gen_soundbank.py 从 GBADoom/music/*.wav 生成。
+
+
+商标声明
+--------
+"SDGOODS"、"谷仓" 及相关产品名 / 标识为各自权利人的商标，不在本仓库代码许可的授权范围内。
+本项目与 SDGOODS / 谷仓官方无隶属或背书关系，仅使用该硬件平台。
