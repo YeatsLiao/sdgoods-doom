@@ -38,9 +38,9 @@ GBADoom 当年把 DOOM 编译到了 Game Boy Advance，本项目把同一条引�
    esptool.py --chip esp32s3 -p COM6 -b 921600 write_flash 0x0 sdgoods-doom-full.bin
    ```
 
-3. 按 RST 重新上电，进 DOOM。
+3. 刷完等它自动重启（或拔插一次 USB-C），即进 DOOM。
 
-如果卡在 `Connecting...`：按住 BOOT、点一下 RST、松开 BOOT 进下载模式，再给命令加 `--before no_reset`。想退回官方固件，走平台安装通道重刷即可，不会变砖。
+本机只有一个电源键，没有 BOOT / RST——正常 USB-C 直连、`write_flash` 就能刷，无需手动进下载模式。万一 esptool 卡在 `Connecting...`，重新拔插一次 USB-C 再试即可。想退回官方固件，走平台安装通道重刷即可，不会变砖。
 
 WAD 和音效含 id Software 版权素材，只作为 Release 资产提供，`git clone` 里没有这两个文件。
 
