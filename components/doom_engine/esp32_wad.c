@@ -1,6 +1,6 @@
-/* esp32_wad.c - 从平台分区表 appdata(0x1000000,16MB) 头部 mmap WAD。
+/* esp32_wad.c - 从 appdata(0x210000) 分区头部 mmap WAD。
  * 本工程是单应用固件，不把 appdata 挂 FAT，头部直接是裸 WAD 数据。
- * 烧录：esptool.py write_flash 0x1000000 DOOM1_PROCESSED.WAD */
+ * 烧录：esptool.py write_flash 0x210000 DOOM1_PROCESSED.WAD */
 #include <string.h>
 #include "esp_log.h"
 #include "esp_partition.h"
@@ -26,7 +26,7 @@ int doom_wad_init(void)
                                        &mapped, &handle);
     if (err != ESP_OK) { ESP_LOGE(TAG, "mmap %zuB failed: %s", map_len, esp_err_to_name(err)); return -1; }
     if (memcmp(mapped, "IWAD", 4) != 0) {
-        ESP_LOGE(TAG, "bad header '%.4s' — WAD 未烧录？write_flash 0x1000000", (const char*)mapped);
+        ESP_LOGE(TAG, "bad header '%.4s' — WAD 未烧录？write_flash 0x210000", (const char*)mapped);
         return -1;
     }
     doom_iwad = (const unsigned char *)mapped;

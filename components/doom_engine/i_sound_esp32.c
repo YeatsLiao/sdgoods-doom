@@ -119,7 +119,7 @@ void I_InitSound(void)
     memset(s_ch, 0, sizeof(s_ch));
     s_bank_ok = load_bank_from_partition();
     if (!s_bank_ok) {
-        ESP_LOGW(TAG, "soundbank 缺失，DOOM 将以静音运行（请先 write_flash 0x1480000 DOOM_SFX.bin）");
+        ESP_LOGW(TAG, "soundbank 缺失，DOOM 将以静音运行（请先 write_flash 0x690000 DOOM_SFX.bin）");
         // 不 return：仍提供接口，只是不出声，避免引擎崩
     }
     if (sdgoods_audio_stream_open() != ESP_OK) {

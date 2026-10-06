@@ -1,23 +1,22 @@
 # Name,      Type, SubType,  Offset,    Size,     Flags
 # ============================================================================
-# 平台托管文件 —— 禁止修改 / 禁止提交改动
+# 本机构建自带分区表 —— 独立单应用 DOOM 整机固件（SINGLE）
 # ----------------------------------------------------------------------------
-# 这块分区表由「谷仓 SDGOODS 开放平台」统一下发：平台安装固件时会用自己的
-# 官方 partition-table.bin 覆盖本文件对应的分区。二次开发者请勿修改本表，
-# 也不要提交对它的改动；本地调试用的预编译镜像在 platform/prebuilt/ 下。
-# 本文件仅作为构建所需的「源」，内容必须与平台官方分区表严格一致。
+# 本仓库是独立游戏固件，不走平台多应用安装链路，分区表由本工程自己定义。
+# 与平台多应用布局的差异：
+#   * 去掉 otadata + ota_0..3 空槽 —— 单应用从 factory 直启，bootloader 无
+#     otadata 分区即回落 factory，无需选槽记录。
+#   * appdata 紧跟 app 落在低位（0x210000），不再固定到高 16MB —— full.bin
+#     因此从 21.7MB 压到约 8MB，且 mmap 落低位不再强依赖 32 位 cache 映射。
+# 运行侧约定（代码按此查找，与绝对偏移无关）：
+#   * esp32_wad.c  按分区名 "appdata" + 相对偏移 0 mmap WAD（WAD_MAP_BYTES 4.25MB）。
+#   * i_sound_esp32.c 读 "appdata" + 相对偏移 0x480000 取音效库。
+#   * 下拉栏（control_center）只读运行分区镜像头算 Size + 用 NVS 'sdg_cc'，
+#     不碰 ota 槽 / appdata，换表无影响。
+# 若要回平台多应用/商店布局，用官方 prebuilt 分区表覆盖即可（本表只服务单体分发）。
 # ============================================================================
-# 谷仓次元屏多应用分区表（固定表 + 动态指派，详见 docs/MULTI_APP_DYNAMIC_SLOTS.md）
-#   launcher  = 启动器（factory@0x10000），等价于旧固件的单应用镜像落点，迁移安全
-#   otadata   = IDF 原生选槽记录（决定「下次启哪个槽」）
-#   ota_0..3  = 4 个固定 app 槽（各 3MB），运行时由 launcher 动态指派 app
-#   appdata   = 高 16MB 的 app 持久数据区（按 app_id 隔离），平台刷机绝不碰这里
+# factory=2MB（当前 app ~1.28MB）；appdata=16MB 装 WAD(~3.72MB@+0)+SFX(~1.16MB@+0x480000)+预留
 nvs,         data, nvs,      0x9000,    0x6000,
 phy_init,    data, phy,      0xF000,    0x1000,
-launcher,    app,  factory,  0x10000,   0x300000,
-otadata,     data, ota,      0x310000,  0x2000,
-ota_0,       app,  ota_0,    0x320000,  0x300000,
-ota_1,       app,  ota_1,    0x620000,  0x300000,
-ota_2,       app,  ota_2,    0x920000,  0x300000,
-ota_3,       app,  ota_3,    0xC20000,  0x300000,
-appdata,     data, fat,      0x1000000, 0x1000000,
+factory,     app,  factory,  0x10000,   0x200000,
+appdata,     data, fat,      0x210000,  0x1000000,
